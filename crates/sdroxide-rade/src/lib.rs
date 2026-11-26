@@ -21,6 +21,7 @@
 mod sys;
 pub mod text;
 pub mod text_v2;
+mod tx_filter;
 pub mod vocoder;
 mod worker;
 

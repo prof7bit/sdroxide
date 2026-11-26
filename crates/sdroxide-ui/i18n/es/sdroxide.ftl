@@ -4540,7 +4540,7 @@ rade-callsign-station-put-end-over =
 rade-stop-talking = DEJAR DE HABLAR
 rade-talk-ptt = HABLAR (PTT)
 rade-open-close-rade-over-modem = Abre o cierra un turno RADE. El módem necesita ~120 ms de voz antes de que salga la primera trama, y envía una trama de fin de turno cuando paras, así que la transmisión se prolonga un poco más allá del botón.
-rade-rade-v1-occupies-roughly-1060 = RADE V1 ocupa aproximadamente 1060–1880 Hz de la banda pasante — banda lateral superior, o inferior en 160, 80 y 40 m, donde RADE mantiene la práctica de fonía y sdroxide cambia por ti. Pon la señal dentro de la banda sombreada de la cascada; el módem la encuentra desde ahí.
+rade-rade-v1-occupies-roughly-1060 = RADE V1 ocupa aproximadamente 750–2200 Hz de la banda pasante — banda lateral superior, o inferior en 160, 80 y 40 m, donde RADE mantiene la práctica de fonía y sdroxide cambia por ti. Pon la señal dentro de la banda sombreada de la cascada; el módem la encuentra desde ahí.
 
 ## frame (src/app/frame.rs)
 

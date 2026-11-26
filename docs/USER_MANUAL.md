@@ -16988,6 +16988,15 @@ only with others made from a matching revision. In practice:
   `RADEV2`. By default you are reported to FreeDV's server for V2 testing as well
   ([§6.6](#66-freedv-freedv-reporter)).
 
+**Transmit filter.** The **TX FILTER** chip in the RADE panel narrows the
+audio you transmit to little more than the signal's carriers: flat from 650 to
+2300 Hz on V1 and from 950 to 2000 Hz on V2. It is on unless you switch it off;
+a change takes effect from your next over. Without it, V1 carries a wide floor of
+splatter on both sides of the signal, because the codec limits its peaks and does
+not filter them afterwards. With it, V1's peaks are limited again after
+filtering, to the same maximum as without. The filter cannot remove what arises
+later, in the radio or from driving it too hard.
+
 **On the panadapter**, a reporter station's marker says **RADE V1** or
 **RADE V2** in place of **FREEDV** when it reports one of the two RADE versions,
 with V2 in a filled badge. Both versions are shown, whichever you have selected.

@@ -4561,7 +4561,7 @@ rade-callsign-station-put-end-over =
 rade-stop-talking = SMETTI DI PARLARE
 rade-talk-ptt = PARLA (PTT)
 rade-open-close-rade-over-modem = Apre o chiude una trasmissione RADE. Il modem ha bisogno di circa 120 ms di parlato prima che parta il primo frame, e invia un frame di fine trasmissione quando smetti, quindi la trasmissione prosegue un po' oltre il pulsante.
-rade-rade-v1-occupies-roughly-1060 = RADE V1 occupa circa 1060–1880 Hz della banda passante — banda laterale superiore, oppure inferiore su 160, 80 e 40 m, dove RADE mantiene la pratica in fonia e sdroxide commuta per te. Metti il segnale dentro la banda ombreggiata sulla waterfall; da lì il modem lo trova.
+rade-rade-v1-occupies-roughly-1060 = RADE V1 occupa circa 750–2200 Hz della banda passante — banda laterale superiore, oppure inferiore su 160, 80 e 40 m, dove RADE mantiene la pratica in fonia e sdroxide commuta per te. Metti il segnale dentro la banda ombreggiata sulla waterfall; da lì il modem lo trova.
 
 ## frame (src/app/frame.rs)
 

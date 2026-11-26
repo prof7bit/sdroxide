@@ -4551,7 +4551,7 @@ rade-callsign-station-put-end-over =
 rade-stop-talking = STOP MET PRATEN
 rade-talk-ptt = PRATEN (PTT)
 rade-open-close-rade-over-modem = Een RADE-zending openen of sluiten. De modem heeft ~120 ms spraak nodig voordat het eerste frame uitgaat, en stuurt een end-of-over-frame wanneer je stopt, dus de zending loopt een klein stukje door na de knop.
-rade-rade-v1-occupies-roughly-1060 = RADE V1 beslaat ongeveer 1060–1880 Hz van de doorlaatband — bovenste zijband, of onderste op 160, 80 en 40 m, waar RADE de spraakpraktijk houdt en sdroxide voor je schakelt. Zet het signaal binnen de gearceerde band op de waterval; de modem vindt het vanaf daar.
+rade-rade-v1-occupies-roughly-1060 = RADE V1 beslaat ongeveer 750–2200 Hz van de doorlaatband — bovenste zijband, of onderste op 160, 80 en 40 m, waar RADE de spraakpraktijk houdt en sdroxide voor je schakelt. Zet het signaal binnen de gearceerde band op de waterval; de modem vindt het vanaf daar.
 
 ## frame (src/app/frame.rs)
 

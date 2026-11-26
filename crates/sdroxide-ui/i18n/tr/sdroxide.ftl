@@ -4549,7 +4549,7 @@ rade-callsign-station-put-end-over =
 rade-stop-talking = KONUŞMAYI DURDUR
 rade-talk-ptt = KONUŞ (PTT)
 rade-open-close-rade-over-modem = Bir RADE yayını açın ya da kapatın. Modem, ilk çerçeve gitmeden önce yaklaşık 120 ms konuşmaya ihtiyaç duyar ve durduğunuzda bir over sonu çerçevesi gönderir; bu yüzden yayın, düğmenin biraz ötesinde sürer.
-rade-rade-v1-occupies-roughly-1060 = RADE V1, geçiş bandının yaklaşık 1060–1880 Hz'ini kaplar — üst yan bant, ya da RADE'in telefon pratiği yaptığı ve sdroxide'ın sizin için değiştirdiği 160, 80 ve 40 m'de alt yan bant. Sinyali şelaledeki gölgeli bandın içine koyun; modem onu oradan bulur.
+rade-rade-v1-occupies-roughly-1060 = RADE V1, geçiş bandının yaklaşık 750–2200 Hz'ini kaplar — üst yan bant, ya da RADE'in telefon pratiği yaptığı ve sdroxide'ın sizin için değiştirdiği 160, 80 ve 40 m'de alt yan bant. Sinyali şelaledeki gölgeli bandın içine koyun; modem onu oradan bulur.
 
 ## frame (src/app/frame.rs)
 

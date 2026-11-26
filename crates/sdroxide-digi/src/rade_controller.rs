@@ -109,6 +109,7 @@ fn start_worker(cfg: &DigiConfig, tap_rate: f64) -> Option<RadeWorker> {
     match RadeWorker::with_version(cfg.rade_version, tap_rate, OUT_RATE) {
         Ok(w) => {
             w.set_callsign(&cfg.my_call);
+            w.set_tx_filter(cfg.rade_tx_filter);
             Some(w)
         }
         Err(e) => {
@@ -392,6 +393,11 @@ impl DigiEngine for RadeController {
             && let Some(w) = self.worker.as_ref()
         {
             w.set_callsign(&cfg.my_call);
+        }
+        if cfg.rade_tx_filter != self.cfg.rade_tx_filter
+            && let Some(w) = self.worker.as_ref()
+        {
+            w.set_tx_filter(cfg.rade_tx_filter);
         }
         self.cfg = cfg;
         self.apply_version();

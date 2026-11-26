@@ -4521,7 +4521,7 @@ rade-callsign-station-put-end-over =
 rade-stop-talking = 停止说话
 rade-talk-ptt = 说话（PTT）
 rade-open-close-rade-over-modem = 开始或结束一次 RADE 通话。调制解调器在第一帧发出之前需要约 120 ms 的语音，并在你停止时发送一个通话结束帧，因此发射会在按钮松开后再持续一小段时间。
-rade-rade-v1-occupies-roughly-1060 = RADE V1 占用通带中约 1060–1880 Hz——上边带，或在 160、80 和 40 米上为下边带，RADE 在这些频段上保留了电话练习，sdroxide 会为你切换。将信号置于瀑布图上的阴影频带之内；调制解调器便会从那里找到它。
+rade-rade-v1-occupies-roughly-1060 = RADE V1 占用通带中约 750–2200 Hz——上边带，或在 160、80 和 40 米上为下边带，RADE 在这些频段上保留了电话练习，sdroxide 会为你切换。将信号置于瀑布图上的阴影频带之内；调制解调器便会从那里找到它。
 
 ## 框架（src/app/frame.rs）
 

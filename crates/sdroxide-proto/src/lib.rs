@@ -1796,7 +1796,9 @@ use sdroxide_types::{
 /// upstream base, so the thousands move instead.
 ///
 /// 62225: `FreeDvReporterConfig` gains `second_host` on its tail.
-pub const PROTO_VERSION: u16 = 62_225;
+///
+/// 63225: `DigiConfig` gains `rade_tx_filter` on its tail.
+pub const PROTO_VERSION: u16 = 63_225;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

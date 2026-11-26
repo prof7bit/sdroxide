@@ -22,6 +22,7 @@ use sdroxide_dsp::MonoResampler;
 use tracing::{info, warn};
 
 use crate::text_v2::TextV2;
+use crate::tx_filter::TxFilter;
 use crate::{
     MODEM_RATE, RX_REAL_SCALE, Rade, RadeError, RadeVersion, SPEECH_RATE, TX_REAL_SCALE,
     VocoderDec, VocoderEnc,
@@ -44,6 +45,8 @@ enum Ctl {
     /// The callsign to transmit: in V1's End-of-Over frame, or V2's data
     /// symbols. Re-encoded on change so keying up costs nothing.
     SetCallsign(String),
+    /// Narrow the transmit audio. Takes effect from the next over.
+    SetTxFilter(bool),
     /// Drop receive state — used when re-entering the mode or after a big
     /// discontinuity.
     Reset,
@@ -177,6 +180,9 @@ impl RadeWorker {
             text_v2,
             call: String::new(),
             heard_v2: Vec::new(),
+            tx_filter: TxFilter::new(version),
+            tx_filter_wanted: false,
+            tx_filter_on: false,
             last_sync_snr: 0.0,
             text_tx,
             transmitting: false,
@@ -199,6 +205,12 @@ impl RadeWorker {
     /// learn who we are.
     pub fn set_callsign(&self, call: &str) {
         let _ = self.ctl.send(Ctl::SetCallsign(call.to_string()));
+    }
+
+    /// Switch the narrow transmit filter on or off. It is off until asked for;
+    /// a change made during an over takes effect from the next one.
+    pub fn set_tx_filter(&self, on: bool) {
+        let _ = self.ctl.send(Ctl::SetTxFilter(on));
     }
 
     /// Drain the callsigns decoded from remote End-of-Over frames since the
@@ -370,6 +382,12 @@ struct Inner {
     call: String,
     heard_v2: Vec<String>,
 
+    /// The transmit filter, whether it is asked for, and whether the over on
+    /// the air uses it.
+    tx_filter: TxFilter,
+    tx_filter_wanted: bool,
+    tx_filter_on: bool,
+
     transmitting: bool,
     was_sync: bool,
     level: f32,
@@ -382,6 +400,7 @@ impl Inner {
                 Ok(Ctl::Stop) | Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 Ok(Ctl::SetTx(on)) => self.set_tx(on),
                 Ok(Ctl::SetCallsign(c)) => self.set_call(c),
+                Ok(Ctl::SetTxFilter(on)) => self.tx_filter_wanted = on,
                 Ok(Ctl::Reset) => self.reset_rx(),
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
             }
@@ -413,6 +432,10 @@ impl Inner {
             while self.rx_in.pop().is_ok() {}
             self.buf8.clear();
             self.reset_rx();
+            // Fixed for the length of the over: switching inside it would put
+            // a step into the signal.
+            self.tx_filter_on = self.tx_filter_wanted;
+            self.tx_filter.reset();
             // Start the callsign from its first bit, so a short over still
             // carries all of it.
             if let Some(t) = self.text_v2.as_mut() {
@@ -447,6 +470,7 @@ impl Inner {
                 warn!(?e, "rade_tx_eoo failed");
             }
             self.emit_tx_iq();
+            self.flush_tx_filter();
             self.buf16.clear();
             self.tx_features.clear();
             while self.tx_in.pop().is_ok() {}
@@ -639,14 +663,34 @@ impl Inner {
         self.rade.tx(features, &mut self.iq)
     }
 
-    /// Take the real part of the modulated IQ, scale it to full-scale audio and
-    /// resample it up for the transmit chain.
+    /// Take the real part of the modulated IQ, scale it to full-scale audio,
+    /// filter it if asked to and send it on.
     fn emit_tx_iq(&mut self) {
         if self.iq.is_empty() {
             return;
         }
         self.scratch.clear();
         self.scratch.extend(self.iq.iter().map(|z| z.re * TX_REAL_SCALE));
+        if self.tx_filter_on {
+            self.tx_filter.process(&mut self.scratch);
+        }
+        self.send_tx_audio();
+    }
+
+    /// Bring out the end of the over, which the filter's delay still holds.
+    fn flush_tx_filter(&mut self) {
+        if !self.tx_filter_on {
+            return;
+        }
+        self.scratch.clear();
+        self.scratch.resize(self.tx_filter.tail_len(), 0.0);
+        self.tx_filter.process(&mut self.scratch);
+        self.send_tx_audio();
+    }
+
+    /// Resample the modem-rate audio in `self.scratch` up for the transmit
+    /// chain.
+    fn send_tx_audio(&mut self) {
         self.audio.clear();
         match self.tx_up.as_mut() {
             Some(r) => r.push(&self.scratch, &mut self.audio),

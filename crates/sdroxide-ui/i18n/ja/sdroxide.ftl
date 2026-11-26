@@ -4531,7 +4531,7 @@ rade-callsign-station-put-end-over =
 rade-stop-talking = 話すのを停止
 rade-talk-ptt = 話す (PTT)
 rade-open-close-rade-over-modem = RADE の交信を開始または終了します。モデムは、最初のフレームが出る前に約 120 ms の音声を必要とし、話し終えると終了フレームを送るため、送信はボタンより少し長く続きます。
-rade-rade-v1-occupies-roughly-1060 = RADE V1 はパスバンドのおよそ 1060〜1880 Hz を占有します。上側波帯、または RADE が音声の練習に使い、sdroxide が切り替える 160、80、40 m では下側波帯です。ウォーターフォールの陰影が付いたバンド内に信号を置いてください。そこからはモデムが見つけます。
+rade-rade-v1-occupies-roughly-1060 = RADE V1 はパスバンドのおよそ 750〜2200 Hz を占有します。上側波帯、または RADE が音声の練習に使い、sdroxide が切り替える 160、80、40 m では下側波帯です。ウォーターフォールの陰影が付いたバンド内に信号を置いてください。そこからはモデムが見つけます。
 
 ## フレーム（src/app/frame.rs）
 

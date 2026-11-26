@@ -133,6 +133,20 @@ impl SdroxideApp {
                         }
                         resp.on_hover_text(tr!("rade-version-tip"));
                     }
+                    ui.add_space(8.0);
+                    // The narrow filter on the transmit audio, for either
+                    // version.
+                    let filtered = self.digi_cfg_edit.rade_tx_filter;
+                    let resp = crate::chrome::chip(
+                        ui,
+                        filtered,
+                        RichText::new(tr!("rade-tx-filter")).size(10.5),
+                    );
+                    if resp.clicked() {
+                        self.digi_cfg_edit.rade_tx_filter = !filtered;
+                        cmds.push(Command::SetDigiConfig(self.digi_cfg_edit.clone()));
+                    }
+                    resp.on_hover_text(tr!("rade-tx-filter-tip"));
                 });
             });
             crate::chrome::row_tail(ui, |ui| {

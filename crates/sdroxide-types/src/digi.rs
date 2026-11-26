@@ -2216,6 +2216,10 @@ impl Default for SstvStyle {
     }
 }
 
+fn rade_tx_filter_default() -> bool {
+    true
+}
+
 /// echoed to clients in [`DigiStatus`]. `#[serde(default)]` so an older
 /// `digi.json` without the newer fields still loads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3048,6 +3052,10 @@ pub struct DigiConfig {
     /// over takes effect once it has ended.
     #[serde(default)]
     pub rade_version: RadeVersion,
+    /// RADE: narrow the transmit audio to little more than the carriers. On
+    /// unless switched off; a change takes effect from the next over.
+    #[serde(default = "rade_tx_filter_default")]
+    pub rade_tx_filter: bool,
 }
 
 fn default_tnc_host_port() -> u16 {
@@ -3319,6 +3327,7 @@ impl Default for DigiConfig {
             psk_modulation: PskModulation::default(),
             psk_coded: PskCoded::default(),
             rade_version: RadeVersion::default(),
+            rade_tx_filter: rade_tx_filter_default(),
         }
     }
 }

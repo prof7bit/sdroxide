@@ -1293,7 +1293,7 @@ impl Mode {
             // dial and swings ±4 kHz, so the passband straddles it. 25 kHz is
             // the profile's recommended occupied bandwidth.
             Mode::Rifp => (-12_500.0, 12_500.0),
-            // RADE V1's OFDM carriers sit between roughly 1060 and 1880 Hz;
+            // RADE V1's OFDM carriers sit between 750 and 2200 Hz, V2's within that;
             // the wider passband leaves room for the acquisition search to
             // track a signal that is off frequency.
             Mode::Rade => (300.0, 2700.0),
