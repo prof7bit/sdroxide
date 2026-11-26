@@ -141,6 +141,7 @@ fn merge_stations(first: &[FreeDvStation], second: &[FreeDvStation]) -> Vec<Free
         let a = &mut out[i];
         a.tx |= b.tx;
         a.rx_snr_db = a.rx_snr_db.or(b.rx_snr_db);
+        a.lsb = a.lsb.or(b.lsb);
         for (mine, theirs) in [(&mut a.version, &b.version), (&mut a.message, &b.message)] {
             if mine.is_empty() {
                 mine.clone_from(theirs);
@@ -160,6 +161,9 @@ fn merge_spots(first: &[Spot], second: &[Spot]) -> Vec<Spot> {
     });
     let mut out = first.to_vec();
     for (b, found) in second.iter().zip(matches) {
+        if let Some(i) = found {
+            out[i].lsb = out[i].lsb.or(b.lsb);
+        }
         match found {
             None => out.push(b.clone()),
             // Who heard them, and how well, is worth having from either.
@@ -225,6 +229,9 @@ impl ReporterGroup {
     pub(crate) fn set_tx(&self, on: bool) {
         self.each(|s| s.set_tx(on));
     }
+    pub(crate) fn set_sideband(&self, lower: bool) {
+        self.each(|s| s.set_sideband(lower));
+    }
     pub(crate) fn set_version(&self, version: RadeVersion) {
         self.each(|s| s.set_version(version));
     }
@@ -263,6 +270,7 @@ mod tests {
             grid: grid.into(),
             version: String::new(),
             message: String::new(),
+            lsb: None,
         }
     }
 

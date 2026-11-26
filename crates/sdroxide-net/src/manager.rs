@@ -66,6 +66,8 @@ pub struct SpotManager {
     /// What we last told the reporter. Replayed into a freshly rebuilt session
     /// so a config change never leaves the site showing a stale frequency.
     rep_freq: u64,
+    /// `None` until the engine has said which sideband it is on.
+    rep_lsb: Option<bool>,
     rep_tx: bool,
     rep_version: RadeVersion,
     rep_visible: bool,
@@ -115,6 +117,7 @@ impl SpotManager {
             op_grid: String::new(),
             freedv: None,
             rep_freq: 0,
+            rep_lsb: None,
             rep_tx: false,
             rep_version: RadeVersion::default(),
             rep_visible: false,
@@ -217,6 +220,17 @@ impl SpotManager {
         self.rep_freq = hz;
         if let Some(h) = &self.freedv {
             h.set_freq(hz);
+        }
+    }
+
+    /// Tell the FreeDV Reporter which sideband we are on.
+    pub fn set_reporter_sideband(&mut self, lower: bool) {
+        if Some(lower) == self.rep_lsb {
+            return;
+        }
+        self.rep_lsb = Some(lower);
+        if let Some(h) = &self.freedv {
+            h.set_sideband(lower);
         }
     }
 
@@ -739,6 +753,9 @@ impl SpotManager {
         // Replay what the engine last told us, so the new session starts with
         // the current picture instead of waiting for the next change.
         h.set_version(self.rep_version);
+        if let Some(lower) = self.rep_lsb {
+            h.set_sideband(lower);
+        }
         h.set_freq(self.rep_freq);
         h.set_tx(self.rep_tx);
         h.set_visible(self.rep_visible);

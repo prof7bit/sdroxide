@@ -483,6 +483,7 @@ impl BroadcastStation {
             (false, false) => Some(format!("{}, {}", self.site, self.country)),
         };
         Spot {
+            lsb: None,
             id: Spot::make_id(SpotKind::Broadcast, &self.name, freq_hz),
             kind: SpotKind::Broadcast,
             freq_hz,

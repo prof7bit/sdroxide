@@ -105,6 +105,9 @@ type Ws = WebSocket<Sock>;
 /// Messages from the engine to the reporter thread.
 enum Ctrl {
     Freq(u64),
+    /// The sideband we are on, `true` for the lower. Goes out with the
+    /// frequency.
+    Sideband(bool),
     Tx(bool),
     /// The RADE version in use, which every report names.
     Version(RadeVersion),
@@ -175,6 +178,9 @@ impl ReporterHandle {
     pub fn set_tx(&self, on: bool) {
         let _ = self.ctrl.send(Ctrl::Tx(on));
     }
+    pub fn set_sideband(&self, lower: bool) {
+        let _ = self.ctrl.send(Ctrl::Sideband(lower));
+    }
     pub fn set_version(&self, version: RadeVersion) {
         let _ = self.ctrl.send(Ctrl::Version(version));
     }
@@ -204,6 +210,8 @@ struct Station {
     grid: String,
     version: String,
     freq_hz: u64,
+    /// `true` for the lower sideband; `None` where the station does not say.
+    lsb: Option<bool>,
     tx: bool,
     mode: String,
     message: String,
@@ -257,6 +265,13 @@ impl Roster {
                 let s = self.by_sid.entry(sid).or_default();
                 Self::fill_identity(s, args);
                 s.freq_hz = freq;
+                // Comes with every frequency, from the servers and clients
+                // that know it; empty, or missing, where they do not.
+                s.lsb = match str_of(args, "sideband").as_deref() {
+                    Some("LSB") => Some(true),
+                    Some("USB") => Some(false),
+                    _ => None,
+                };
                 true
             }
             "tx_report" => {
@@ -346,14 +361,16 @@ impl Roster {
                 grid: s.grid.clone(),
                 version: s.version.clone(),
                 message: s.message.clone(),
+                lsb: s.lsb,
             })
             .collect();
         // The whole tuple, so that one call signed in twice cannot swap places
         // with the map's iteration order and look like a change.
         v.sort_by(|a, b| {
-            (&a.call, a.freq_hz, a.tx, a.rx_snr_db, &a.grid, &a.version, &a.message).cmp(&(
+            (&a.call, a.freq_hz, a.lsb, a.tx, a.rx_snr_db, &a.grid, &a.version, &a.message).cmp(&(
                 &b.call,
                 b.freq_hz,
+                b.lsb,
                 b.tx,
                 b.rx_snr_db,
                 &b.grid,
@@ -392,6 +409,7 @@ impl Roster {
                 };
                 Spot {
                     id: Spot::make_id(SpotKind::FreeDv, &s.call, freq_hz),
+                    lsb: s.lsb,
                     kind: SpotKind::FreeDv,
                     freq_hz,
                     call: s.call.clone(),
@@ -449,6 +467,8 @@ struct Reporter {
 
     // ── Desired state, always current whether or not we are connected.
     freq: u64,
+    /// `None` until the engine has said.
+    lsb: Option<bool>,
     tx: bool,
     version: RadeVersion,
     /// `Some`: we only report while on this version. Otherwise the session is
@@ -510,6 +530,7 @@ impl Reporter {
             out,
             ctrl,
             freq: 0,
+            lsb: None,
             tx: false,
             version: RadeVersion::default(),
             report_only_on: None,
@@ -863,6 +884,12 @@ impl Reporter {
                     self.emit_tx();
                 }
             }
+            Ctrl::Sideband(lower) => {
+                if Some(lower) != self.lsb {
+                    self.lsb = Some(lower);
+                    self.emit_freq();
+                }
+            }
             Ctrl::Version(v) => {
                 if v != self.version {
                     let reported = self.may_report();
@@ -941,7 +968,7 @@ impl Reporter {
 
     fn emit_freq(&mut self) {
         if self.fully_connected && self.may_report() {
-            self.report(socketio::emit("freq_change", Some(&json!({ "freq": self.freq }))));
+            self.report(freq_frame(self.freq, self.lsb));
         }
     }
 
@@ -1101,6 +1128,17 @@ fn rx_report_frame(version: RadeVersion, call: &str, snr: i32) -> String {
             "snr": snr,
         })),
     )
+}
+
+/// One `freq_change` frame: the dial, and the sideband as FreeDV names it, or
+/// empty while we do not know.
+fn freq_frame(freq: u64, lsb: Option<bool>) -> String {
+    let sideband = match lsb {
+        Some(true) => "LSB",
+        Some(false) => "USB",
+        None => "",
+    };
+    socketio::emit("freq_change", Some(&json!({ "freq": freq, "sideband": sideband })))
 }
 
 /// A short host-platform string, matching what other clients report.
@@ -1633,6 +1671,23 @@ mod tests {
         rep.apply(Ctrl::Version(RadeVersion::V2));
         assert_eq!(rep.auth()["role"], "report");
         assert_eq!(rep.auth()["callsign"], "OE1TKJ");
+    }
+
+    #[test]
+    fn the_sideband_goes_out_with_the_frequency_and_comes_in_with_theirs() {
+        let frame = freq_frame(7_174_000, Some(false));
+        assert!(frame.contains(r#""sideband":"USB""#), "{frame}");
+        assert!(freq_frame(7_177_000, Some(true)).contains(r#""sideband":"LSB""#));
+
+        let mut r = Roster::default();
+        r.on_event("new_connection", &connect_ev("s1", "K1ABC", "FN42"));
+        for (said, want) in [("USB", Some(false)), ("LSB", Some(true)), ("", None)] {
+            r.on_event(
+                "freq_change",
+                &json!({ "sid": "s1", "freq": 7_177_000u64, "sideband": said }),
+            );
+            assert_eq!(r.spots(0, None)[0].lsb, want, "{said:?}");
+        }
     }
 
     #[test]

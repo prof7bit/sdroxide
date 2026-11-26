@@ -16988,6 +16988,21 @@ only with others made from a matching revision. In practice:
   `RADEV2`. By default you are reported to FreeDV's server for V2 testing as well
   ([§6.6](#66-freedv-freedv-reporter)).
 
+**Sideband.** RADE normally takes its sideband from the band: lower on 160, 80
+and 40 m, upper elsewhere, 60 m included. The **LSB** and **USB** chips in the
+RADE panel override that, for stations that work the other one. The dial stays
+where it is, so a signal found on one sideband needs retuning on the other, by
+about 3 kHz. The waterfall view is mirrored about the dial, keeping your zoom, so
+that the passband stays in sight. Receive, transmit, the waterfall and the mode commanded
+to a CAT rig all follow. The choice lasts while you tune within the band and is
+dropped when you leave it; choosing the usual sideband drops it too. It cannot
+be changed while transmitting.
+
+FreeDV Reporter carries the sideband with each frequency, though many stations
+do not send it. Yours is sent. Clicking a RADE station's marker or its row in
+the SPOTS window tunes to the frequency it reports, switches to RADE and takes
+its sideband, or the band's usual one if it sends none. It does not change between V1 and V2.
+
 **Transmit filter.** The **TX FILTER** chip in the RADE panel narrows the
 audio you transmit to little more than the signal's carriers: flat from 650 to
 2300 Hz on V1 and from 950 to 2000 Hz on V2. It is on unless you switch it off;
@@ -16999,7 +17014,9 @@ later, in the radio or from driving it too hard.
 
 **On the panadapter**, a reporter station's marker says **RADE V1** or
 **RADE V2** in place of **FREEDV** when it reports one of the two RADE versions,
-with V2 in a filled badge. Both versions are shown, whichever you have selected.
+with V2 in a filled badge. **LSB** or **USB** follows where the station sends
+its sideband. Both versions and both sidebands are shown, whichever you have
+selected.
 
 **Who is on your frequency.** With the feature on, the RADE panel lists the other
 reporter stations within 1 kHz of your transmit frequency that report the RADE
@@ -17008,7 +17025,9 @@ whatever software they run. They are sorted nearest first, by the distance
 between their locator and yours; those without a usable one come last. Each
 shows its distance in km, its software and its status message. In a narrow
 panel, such as on a phone, message and software take a second line; point at a
-row to read what was cut off. **TX/RX** shows whether each one is transmitting. A station
+row to read what was cut off. **SB** shows the sideband a station sends, or **?** where it sends none, and is
+filled where it differs from yours. Stations on both sidebands are listed.
+**TX/RX** shows whether each one is transmitting. A station
 that reports receiving a signal also shows that **SNR**; whose signal it is is
 not shown. Rows are tinted red while a station transmits. While it is receiving they
 are green above 0 dB SNR and yellow at 0 dB or less. As in FreeDV GUI, the SNR stays for 20 s after the last report naming

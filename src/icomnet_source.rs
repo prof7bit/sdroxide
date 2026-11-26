@@ -188,6 +188,9 @@ pub struct IcomNetSource {
     status: Option<String>,
 
     dial: Dial,
+    /// The operator's own RADE sideband — see
+    /// [`IqSource::set_forced_sideband`].
+    forced_lsb: Option<bool>,
     /// Rolling buffer for the CI-V parser. Frames arrive whole, but reusing the
     /// tested parser costs nothing and it drops our own echoes for us.
     civ_buf: Vec<u8>,
@@ -360,6 +363,7 @@ impl IcomNetSource {
             label: format!("{} over LAN at {}", info.radio_name, cfg.address),
             status: None,
             dial: Dial::default(),
+            forced_lsb: None,
             civ_buf: Vec::with_capacity(1024),
             pending: Vec::new(),
             ddc: (rx_source == IcomRxSource::If12k).then(|| {
@@ -1114,6 +1118,10 @@ impl IqSource for IcomNetSource {
         true
     }
 
+    fn set_forced_sideband(&mut self, lower: Option<bool>) {
+        self.forced_lsb = lower;
+    }
+
     fn set_control_mode(&mut self, mode: Mode) -> Result<()> {
         // CW keyed as audio (MCW) rides a sideband: a rig put in CW keys its
         // own transmitter and ignores the modulator input, so the keyed
@@ -1129,7 +1137,14 @@ impl IqSource for IcomNetSource {
             // sidebands: the picture — or the over — is modulated here and
             // arrives at the radio's data input, which is what these modes
             // already ask this family for on the bands where they ride USB.
-            m if m.sideband_follows_band() && m.is_lower_sideband_at(self.dial.vfo) => Mode::Digl,
+            m if m.sideband_follows_band()
+                && self
+                    .forced_lsb
+                    .filter(|_| m.is_rade())
+                    .unwrap_or_else(|| m.is_lower_sideband_at(self.dial.vfo)) =>
+            {
+                Mode::Digl
+            }
             m => m,
         };
         self.mode_cmd = Some((civ::mode_to_civ(mode), Instant::now()));

@@ -267,7 +267,7 @@ pub struct SdroxideApp {
     /// has arrived, so a window fitted then is clamped into the *default*
     /// span and is left stranded when the real one turns up — which is exactly
     /// what APRS does, being the one mode that moves the dial by itself.
-    digi_view_fit: Option<(Mode, f64, f64)>,
+    digi_view_fit: Option<(Mode, f64, f64, bool)>,
     /// egui time of the last received spectrum frame, for stall detection.
     last_spectrum_at: f64,
     /// Waterfall time-scroll state: wall-clock (UTC secs) of the last tick and

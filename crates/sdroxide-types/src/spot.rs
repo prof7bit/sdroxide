@@ -161,6 +161,11 @@ pub struct Spot {
     /// rather than reading the two separately.
     #[serde(default)]
     pub color: Option<[u8; 3]>,
+    /// The sideband the station says it is on, `true` for the lower, if it
+    /// says. Only FreeDV Reporter does. Appended last: postcard numbers fields
+    /// by position.
+    #[serde(default)]
+    pub lsb: Option<bool>,
 }
 
 impl Spot {
@@ -180,6 +185,8 @@ impl Spot {
         let m = self.mode.trim().to_ascii_uppercase();
         match m.as_str() {
             "" => None,
+            // How FreeDV Reporter names its two waveforms.
+            "RADEV1" | "RADEV2" => Some(Mode::Rade),
             "SSB" | "PHONE" | "USB/LSB" => {
                 Some(if self.freq_hz < 10_000_000.0 { Mode::Lsb } else { Mode::Usb })
             }

@@ -40,6 +40,7 @@ fn parse(body: &str, now: i64) -> Result<Vec<Spot>, String> {
         };
         let snr_db = attr("sNR").parse::<i16>().ok();
         let spot = Spot {
+            lsb: None,
             id: Spot::make_id(SpotKind::PskReporter, &call, freq_hz),
             kind: SpotKind::PskReporter,
             freq_hz,

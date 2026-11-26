@@ -759,6 +759,12 @@ pub struct RadioState {
     /// position.
     #[serde(default)]
     pub pa_enable: Option<bool>,
+    /// RADE: the sideband the operator chose against the band's usual one,
+    /// `true` for the lower. `None` follows the band, as
+    /// [`Mode::is_lower_sideband_at`] has it. Dropped on leaving the band it
+    /// was chosen on. Appended last: postcard numbers fields by position.
+    #[serde(default)]
+    pub rade_lsb: Option<bool>,
 }
 
 /// Where a radio's built-in antenna tuner stands, as the radio reports it.
@@ -847,11 +853,31 @@ impl Default for RadioState {
             sonde: crate::SondeSettings::default(),
             hfdl_outputs: crate::HfdlOutputs::default(),
             pa_enable: None,
+            rade_lsb: None,
         }
     }
 }
 
 impl RadioState {
+    /// The operator's own sideband where it applies to `mode` — RADE only —
+    /// as [`Self::rade_lsb`].
+    pub fn forced_lsb(&self, mode: Mode) -> Option<bool> {
+        self.rade_lsb.filter(|_| mode.is_rade())
+    }
+
+    /// [`Mode::is_lower_sideband_at`], with the operator's choice for RADE.
+    /// What anything working this radio has to ask.
+    pub fn is_lower_sideband(&self, mode: Mode, dial_hz: f64) -> bool {
+        self.forced_lsb(mode).unwrap_or_else(|| mode.is_lower_sideband_at(dial_hz))
+    }
+
+    /// [`Mode::default_filter_at`], on the sideband
+    /// [`Self::is_lower_sideband`] answers.
+    pub fn filter_at(&self, mode: Mode, dial_hz: f64) -> (f32, f32) {
+        let (lo, hi) = mode.default_filter();
+        if self.is_lower_sideband(mode, dial_hz) && lo >= 0.0 { (-hi, -lo) } else { (lo, hi) }
+    }
+
     /// Why `mode` cannot be used at this station, or `None` when it can — the
     /// sentence a greyed-out mode shows. Only HD Radio can be missing today:
     /// see [`Self::hd_radio_unavailable`].

@@ -103,6 +103,8 @@ pub struct RadeWatch {
     tx: AtomicBool,
     /// The holder is on RADE V2 rather than V1.
     v2: AtomicBool,
+    /// The holder is on the lower sideband.
+    lsb: AtomicBool,
 }
 
 impl RadeWatch {
@@ -136,6 +138,19 @@ impl RadeWatch {
             self.tx.store(transmitting, Ordering::Relaxed);
             self.v2.store(version == RadeVersion::V2, Ordering::Relaxed);
         }
+    }
+
+    /// The holder's sideband, published after [`Self::publish`]; anybody
+    /// else's is ignored.
+    pub fn publish_sideband(&self, radio: u32, lower: bool) {
+        if self.owner.load(Ordering::Acquire) == radio + 1 {
+            self.lsb.store(lower, Ordering::Relaxed);
+        }
+    }
+
+    /// Whether the holder is on the lower sideband.
+    pub fn lower_sideband(&self) -> bool {
+        self.lsb.load(Ordering::Relaxed)
     }
 
     /// What to report: the holder's `(frequency, transmitting, version)`, or

@@ -12,22 +12,27 @@ use crate::app::{SdroxideApp, tx_gated};
 
 /// How far from our own frequency a station may be and still be listed.
 const NEARBY_HZ: u64 = 1_000;
-/// Column positions of the station list, from its left edge. The first four
+/// Column positions of the station list, from its left edge. The first five
 /// are narrow enough for a phone.
-const STATUS_X: f32 = 100.0;
-const SNR_RIGHT_X: f32 = 190.0;
-const KM_RIGHT_X: f32 = 275.0;
+const SB_X: f32 = 100.0;
+const STATUS_X: f32 = 140.0;
+const SNR_RIGHT_X: f32 = 230.0;
+const KM_RIGHT_X: f32 = 315.0;
 /// Where software and message go: on the same line from [`ONE_LINE_W`] on,
 /// otherwise on a second one.
-const VERSION_X: f32 = 295.0;
+const VERSION_X: f32 = 335.0;
 const VERSION_W: f32 = 245.0;
-const ONE_LINE_W: f32 = 760.0;
+const ONE_LINE_W: f32 = 800.0;
 const ROW_H: f32 = 18.0;
 
 /// One line of the station list: the text of each column.
 #[derive(Default)]
 struct StationCells<'a> {
     call: &'a str,
+    sideband: &'a str,
+    /// The station says it is on the other sideband than ours: marked, since
+    /// we have to switch to hear it.
+    other_sideband: bool,
     status: &'a str,
     snr: &'a str,
     km: &'a str,
@@ -63,6 +68,15 @@ fn station_row(
     ] {
         p.text(egui::pos2(r.left() + x, first), align, text, font.clone(), color);
     }
+    // Filled where marked: a text colour alone would be lost on the row tints.
+    let ink = if c.other_sideband { crate::theme::INK_ON_CYAN() } else { color };
+    let sideband = p.layout_no_wrap(c.sideband.to_string(), font.clone(), ink);
+    let at = egui::pos2(r.left() + SB_X, first - sideband.size().y / 2.0);
+    if c.other_sideband {
+        let chip = egui::Rect::from_min_size(at, sideband.size()).expand2(egui::vec2(2.0, 0.0));
+        p.rect_filled(chip, 2.0, crate::theme::CYAN());
+    }
+    p.galley(at, sideband, ink);
     if one_line {
         // Clipped to its column, so a long one cannot run into the message.
         let column = egui::Rect::from_min_size(
@@ -132,6 +146,23 @@ impl SdroxideApp {
                             cmds.push(Command::SetDigiConfig(self.digi_cfg_edit.clone()));
                         }
                         resp.on_hover_text(tr!("rade-version-tip"));
+                    }
+                    ui.add_space(8.0);
+                    // Which sideband, shown as it is in effect: the band's
+                    // usual one unless chosen otherwise here.
+                    let lower = self
+                        .state
+                        .is_lower_sideband(sdroxide_types::Mode::Rade, self.state.rx_freq_hz());
+                    for (choice, name) in [(true, "LSB"), (false, "USB")] {
+                        let resp = crate::chrome::chip(
+                            ui,
+                            lower == choice,
+                            RichText::new(name).size(10.5),
+                        );
+                        if resp.clicked() && lower != choice {
+                            cmds.push(Command::SetRadeSideband(choice));
+                        }
+                        resp.on_hover_text(tr!("rade-sideband-tip"));
                     }
                     ui.add_space(8.0);
                     // The narrow filter on the transmit audio, for either
@@ -325,6 +356,10 @@ impl SdroxideApp {
     fn rade_station_list(&self, ui: &mut egui::Ui) {
         let ours = self.state.tx_freq_hz().round().max(0.0) as u64;
         let my_grid = &self.digi_cfg_edit.my_grid;
+        // Both sidebands are listed: many stations do not say which they are
+        // on, and guessing would hide some of those worth trying.
+        let our_lsb =
+            self.state.is_lower_sideband(sdroxide_types::Mode::Rade, self.state.tx_freq_hz());
         let mut rows: Vec<_> = self
             .freedv_stations
             .iter()
@@ -348,6 +383,8 @@ impl SdroxideApp {
         let (version, message) = (tr!("rade-col-version"), tr!("rade-col-message"));
         let header = StationCells {
             call: &call,
+            sideband: "SB",
+            other_sideband: false,
             status: &status,
             snr: &snr,
             km: "km",
@@ -374,6 +411,13 @@ impl SdroxideApp {
             let message = s.message.replace(['\r', '\n'], " ");
             let cells = StationCells {
                 call: &s.call,
+                // "?" where it does not say.
+                sideband: match s.lsb {
+                    Some(true) => "LSB",
+                    Some(false) => "USB",
+                    None => "?",
+                },
+                other_sideband: s.lsb.is_some_and(|lower| lower != our_lsb),
                 status,
                 snr: &snr,
                 km: &km,

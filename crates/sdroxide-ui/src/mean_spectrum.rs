@@ -498,6 +498,7 @@ pub fn extra_label_candidates(now_utc: i64) -> Vec<sdroxide_types::Spot> {
     use sdroxide_types::{Spot, SpotKind};
     let spot =
         |call: String, freq_hz: f64, mode: &str, comment: &str, loc: Option<(f64, f64)>| Spot {
+            lsb: None,
             id: Spot::make_id(SpotKind::Broadcast, &call, freq_hz),
             kind: SpotKind::Broadcast,
             freq_hz,

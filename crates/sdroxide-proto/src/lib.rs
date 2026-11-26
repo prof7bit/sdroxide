@@ -1798,7 +1798,11 @@ use sdroxide_types::{
 /// 62225: `FreeDvReporterConfig` gains `second_host` on its tail.
 ///
 /// 63225: `DigiConfig` gains `rade_tx_filter` on its tail.
-pub const PROTO_VERSION: u16 = 63_225;
+///
+/// 64225: `RadioState` gains `rade_lsb` on its tail, and `Command` a trailing
+/// `SetRadeSideband` and `FollowRadeSideband`. `Spot` and `FreeDvStation` gain
+/// `lsb` on their tails.
+pub const PROTO_VERSION: u16 = 64_225;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]
@@ -3437,6 +3441,7 @@ mod tests {
     fn roundtrip_tci_spots() {
         use sdroxide_types::SpotKind;
         let spot = |kind, color| Spot {
+            lsb: None,
             id: Spot::make_id(kind, "RN6LHF", 7_100_000.0),
             kind,
             freq_hz: 7_100_000.0,

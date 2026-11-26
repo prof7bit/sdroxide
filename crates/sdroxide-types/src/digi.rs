@@ -665,6 +665,8 @@ pub struct FreeDvStation {
     pub version: String,
     /// The free-text status line it has set; usually empty.
     pub message: String,
+    /// The sideband it says it is on, `true` for the lower. Many do not say.
+    pub lsb: Option<bool>,
 }
 
 /// Live state of the RADE modem.

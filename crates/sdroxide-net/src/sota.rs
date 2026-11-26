@@ -31,6 +31,7 @@ fn parse(body: &str, now: i64) -> Result<Vec<Spot>, String> {
         let details = str_field(e, "summitDetails");
         let comment = if details.is_empty() { summit.clone() } else { details };
         out.push(Spot {
+            lsb: None,
             id: Spot::make_id(SpotKind::Sota, &call, freq_hz),
             kind: SpotKind::Sota,
             freq_hz,

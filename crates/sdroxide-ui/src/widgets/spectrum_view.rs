@@ -930,9 +930,15 @@ struct NetBox {
 /// needing a second colour.
 fn net_spot_tag(spot: &Spot) -> (&'static str, bool) {
     if spot.kind == sdroxide_types::SpotKind::FreeDv {
-        match spot.mode.as_str() {
-            "RADEV1" => return ("RADE V1", false),
-            "RADEV2" => return ("RADE V2", true),
+        // The sideband only where the station has said it, so that what is
+        // reported can be told from what is assumed.
+        match (spot.mode.as_str(), spot.lsb) {
+            ("RADEV1", None) => return ("RADE V1", false),
+            ("RADEV1", Some(true)) => return ("RADE V1 LSB", false),
+            ("RADEV1", Some(false)) => return ("RADE V1 USB", false),
+            ("RADEV2", None) => return ("RADE V2", true),
+            ("RADEV2", Some(true)) => return ("RADE V2 LSB", true),
+            ("RADEV2", Some(false)) => return ("RADE V2 USB", true),
             _ => {}
         }
     }
@@ -1276,6 +1282,15 @@ fn tune_to_net_spot(
             set_mode(m, cmds);
         }
         None => cmds.push(Command::TuneInSpan { vfo: state.active_vfo, hz: spot.freq_hz }),
+    }
+    follow_spot_sideband(spot, cmds);
+}
+
+/// After tuning onto a RADE station: take its sideband, or the band's usual one
+/// where it does not say. Behind the tune and the mode, which it depends on.
+pub(crate) fn follow_spot_sideband(spot: &Spot, cmds: &mut Vec<Command>) {
+    if spot.kind == sdroxide_types::SpotKind::FreeDv && spot.radio_mode() == Some(Mode::Rade) {
+        cmds.push(Command::FollowRadeSideband(spot.lsb));
     }
 }
 
@@ -3897,6 +3912,7 @@ mod tests {
 
     fn cw_spot() -> Spot {
         Spot {
+            lsb: None,
             id: 1,
             kind: sdroxide_types::SpotKind::DxCluster,
             freq_hz: 14_025_000.0,

@@ -46,6 +46,7 @@ impl SpotBook {
             self.by_call.remove(&oldest);
         }
         let spot = Spot {
+            lsb: None,
             id: Spot::make_id(SpotKind::Tci, &s.call, s.freq_hz),
             kind: SpotKind::Tci,
             freq_hz: s.freq_hz,

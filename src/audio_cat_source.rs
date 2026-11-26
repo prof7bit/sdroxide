@@ -1164,6 +1164,10 @@ impl IqSource for AudioCatSource {
         Ok(())
     }
 
+    fn set_forced_sideband(&mut self, lower: Option<bool>) {
+        self.cat.set_forced_sideband(lower);
+    }
+
     /// The CAT link does: the mode goes through `digi_mode` there, on whichever
     /// sideband the dial says analog SSTV or RADE is riding — see
     /// `commanded_mode`.

@@ -469,6 +469,7 @@ impl SdroxideApp {
             }
             None => cmds.push(Command::SetVfo { vfo: self.state.active_vfo, hz: spot.freq_hz }),
         }
+        crate::widgets::spectrum_view::follow_spot_sideband(spot, cmds);
         self.prefill_from_spot(spot);
     }
 
@@ -1305,6 +1306,7 @@ mod spots_map_tests {
     #[test]
     fn a_broadcast_spot_gives_back_its_power() {
         let mut s = Spot {
+            lsb: None,
             id: 1,
             kind: SpotKind::Broadcast,
             freq_hz: 9_650_000.0,
@@ -1355,6 +1357,7 @@ mod spots_map_tests {
     #[test]
     fn an_unplaced_station_gets_an_honest_approximate_place() {
         let mk = |call: &str, reference: &str| Spot {
+            lsb: None,
             id: 1,
             kind: SpotKind::Broadcast,
             freq_hz: 6_000_000.0,
@@ -1404,6 +1407,7 @@ mod spot_tuned_tests {
     #[test]
     fn the_spot_under_the_dial_is_the_tuned_one() {
         let s = Spot {
+            lsb: None,
             id: 1,
             kind: SpotKind::Broadcast,
             freq_hz: 9_650_000.0,
@@ -1502,6 +1506,7 @@ mod tests {
     #[test]
     fn the_spots_map_cache_follows_the_shown_list() {
         let mk = |id: u64, call: &str, reference: &str, loc: Option<(f64, f64)>| Spot {
+            lsb: None,
             id,
             kind: SpotKind::Broadcast,
             freq_hz: 6_000_000.0 + id as f64,
@@ -1550,6 +1555,7 @@ mod tci_note_tests {
 
     fn tci(call: &str) -> Spot {
         Spot {
+            lsb: None,
             id: 1,
             kind: SpotKind::Tci,
             freq_hz: 433_920_000.0,

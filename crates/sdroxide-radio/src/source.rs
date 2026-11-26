@@ -789,6 +789,12 @@ pub trait IqSource: Send {
         Ok(())
     }
 
+    /// The operator's own sideband for RADE (`true` the lower), or `None` to
+    /// follow the band. Only for a source that works the sideband out itself
+    /// ([`Self::resolves_band_sideband`]); every other one is handed the
+    /// result as the mode. Sent ahead of every [`Self::set_control_mode`].
+    fn set_forced_sideband(&mut self, _lower: Option<bool>) {}
+
     /// Command the rig's own receive filter to the passband the operator picked
     /// here, as audio-band edges in Hz either side of the dial.
     ///
@@ -1812,6 +1818,10 @@ impl IqSource for ConvertedSource {
 
     fn set_control_mode(&mut self, mode: Mode) -> Result<()> {
         self.inner.set_control_mode(mode)
+    }
+
+    fn set_forced_sideband(&mut self, lower: Option<bool>) {
+        self.inner.set_forced_sideband(lower);
     }
 
     /// Audio-band edges either side of the dial, which the converter does not

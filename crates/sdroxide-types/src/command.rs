@@ -1357,4 +1357,17 @@ pub enum Command {
     /// [`crate::RadioState::pa_enable`]). Ignored by a radio with no such
     /// switch. Appended for the usual reason.
     SetPa(bool),
+
+    /// Put RADE on the lower (`true`) or upper sideband. Choosing the band's
+    /// usual one goes back to following the band; either way the choice lasts
+    /// until the dial leaves the band (see [`crate::RadioState::rade_lsb`]).
+    /// Ignored outside RADE and while transmitting. Appended for the usual
+    /// reason.
+    SetRadeSideband(bool),
+
+    /// Take the sideband of a station RADE has just been tuned to: `true` the
+    /// lower, `None` where it did not say, which means the band's usual one.
+    /// Ignored outside RADE and while transmitting. Appended for the usual
+    /// reason.
+    FollowRadeSideband(Option<bool>),
 }

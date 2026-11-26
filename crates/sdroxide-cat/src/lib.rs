@@ -1319,6 +1319,8 @@ fn make_protocol(cfg: &CatConfig) -> Box<dyn Protocol> {
 enum CatCmd {
     Freq(f64),
     Mode(Mode),
+    /// The operator's own RADE sideband; applies to the mode commands behind it.
+    ForcedSideband(Option<bool>),
     Ptt(bool),
     /// Text for the rig's own keyer to send.
     Cw(String),
@@ -1416,6 +1418,11 @@ impl CatHandle {
     }
     pub fn set_mode(&self, m: Mode) {
         let _ = self.cmd_tx.send(CatCmd::Mode(m));
+    }
+    /// The operator's own sideband for RADE (`true` the lower), or `None` to
+    /// follow the band. Takes effect with the next [`Self::set_mode`].
+    pub fn set_forced_sideband(&self, lower: Option<bool>) {
+        let _ = self.cmd_tx.send(CatCmd::ForcedSideband(lower));
     }
     pub fn set_ptt(&self, on: bool) {
         let _ = self.cmd_tx.send(CatCmd::Ptt(on));
@@ -2538,11 +2545,24 @@ fn apply_line(port: &mut dyn Link, forced: LineState, rts: bool) {
 /// inverted and decodes for nobody (issue #317). Without a dial the sideband
 /// cannot be worked out, so the upper pair is assumed, as it was for every
 /// mode before this took a frequency at all.
+#[cfg(test)]
 fn commanded_mode(cfg: &CatConfig, app_mode: Mode, dial_hz: Option<f64>) -> Option<Mode> {
+    commanded_mode_on(cfg, app_mode, dial_hz, None)
+}
+
+/// `forced_lsb` is the operator's own sideband, which only RADE takes.
+fn commanded_mode_on(
+    cfg: &CatConfig,
+    app_mode: Mode,
+    dial_hz: Option<f64>,
+    forced_lsb: Option<bool>,
+) -> Option<Mode> {
     let rides_digi_sideband = (app_mode.is_digital() && !app_mode.is_carrier_centered())
         || (app_mode == Mode::Cw && cfg.cw_keying == CwKeying::Audio);
     if rides_digi_sideband {
-        let lower = dial_hz.is_some_and(|hz| app_mode.is_lower_sideband_at(hz));
+        let lower = forced_lsb
+            .filter(|_| app_mode.is_rade())
+            .unwrap_or_else(|| dial_hz.is_some_and(|hz| app_mode.is_lower_sideband_at(hz)));
         return match cfg.digi_mode {
             DigiMode::Radio => None,
             DigiMode::Usb => Some(if lower { Mode::Lsb } else { Mode::Usb }),
@@ -2695,9 +2715,11 @@ fn serial_thread(
     let mut last_rfl: Option<f32> = None;
     // See `commanded_mode` for the app-mode → rig-mode policy. The dial comes
     // in because one mode's sideband follows the band — see there.
-    let mode_cmd = |app_mode: Mode, dial: Option<f64>| -> Option<Mode> {
-        commanded_mode(&cfg, app_mode, dial)
+    let mode_cmd = |app_mode: Mode, dial: Option<f64>, forced: Option<bool>| -> Option<Mode> {
+        commanded_mode_on(&cfg, app_mode, dial, forced)
     };
+    // Outlives a reconnect: the engine only sends it along with a mode.
+    let mut forced_lsb: Option<bool> = None;
 
     loop {
         // (Re)open the port, retrying on failure.
@@ -2981,8 +3003,9 @@ fn serial_thread(
                         pending_freq = Some(hz); // coalesce
                         dial_hz = Some(hz);
                     }
+                    Ok(CatCmd::ForcedSideband(lower)) => forced_lsb = lower,
                     Ok(CatCmd::Mode(m)) => {
-                        if let Some(mm) = mode_cmd(m, dial_hz) {
+                        if let Some(mm) = mode_cmd(m, dial_hz, forced_lsb) {
                             let f = protocol.set_mode(mm);
                             if mode_memory.needs(&f) {
                                 if write_frame(

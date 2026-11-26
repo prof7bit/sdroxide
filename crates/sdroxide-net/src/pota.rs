@@ -50,6 +50,7 @@ fn parse(body: &str, now: i64) -> Result<Vec<Spot>, String> {
                 _ => None,
             };
         out.push(Spot {
+            lsb: None,
             id: Spot::make_id(SpotKind::Pota, &call, freq_hz),
             kind: SpotKind::Pota,
             freq_hz,

@@ -3693,6 +3693,9 @@ struct Engine {
     /// Whether the Hermes-Lite 2's PA was last on or off on each band — see
     /// [`sdroxide_config::Session::band_pa`] and [`Engine::follow_band_pa`].
     band_pa: sdroxide_config::BandPa,
+    /// The band [`RadioState::rade_lsb`] was chosen on; meaningless while
+    /// that is `None`.
+    rade_lsb_band: Band,
     /// The [`gain_slot`] the dial was in at the last check.
     gain_slot_seen: String,
     /// Whether gains follow the band —
@@ -4989,6 +4992,7 @@ fn engine_thread(
         band_drive,
         band_tune_drive,
         band_pa,
+        rade_lsb_band: Band::M20,
         gain_slot_seen,
         gain_per_band: !radio_cfg.same_gain_all_bands,
         want_gains,
@@ -6915,9 +6919,14 @@ impl Engine {
                 // (MCW) is commanded as the digi sideband, and a rig echoing
                 // that back has done exactly as it was told.
                 let cw_mcw = cur == Mode::Cw && self.source.cw_audio_keyed();
-                let same_class =
-                    expected_rig_class(self.control_mode(), cw_mcw, self.state.rx_freq_hz())
-                        == rig_mode_class(m);
+                let commanded = self.control_mode();
+                // The operator's own RADE sideband is what the rig was told.
+                let expected = match self.state.forced_lsb(commanded) {
+                    Some(true) => rig_mode_class(Mode::Lsb),
+                    Some(false) => rig_mode_class(commanded),
+                    None => expected_rig_class(commanded, cw_mcw, self.state.rx_freq_hz()),
+                };
+                let same_class = expected == rig_mode_class(m);
                 if cur.is_digital() || cw_mcw {
                     // Digital modes (FT8/FT4/PSK/RTTY/SSTV) — and CW-as-MCW —
                     // are app-driven and ride the sideband the app chose. Never
@@ -6927,7 +6936,7 @@ impl Engine {
                     // Re-commanding just echoes the same sideband, which is
                     // same-class and ignored, so this settles (no feedback).
                     if !same_class {
-                        let _ = self.source.set_control_mode(self.control_mode());
+                        self.push_control_mode();
                     }
                     return;
                 }
@@ -7026,7 +7035,7 @@ impl Engine {
             return;
         }
         let dial = self.state.rx_freq_hz();
-        let lsb = self.state.rx[0].mode.is_lower_sideband_at(dial);
+        let lsb = self.state.is_lower_sideband(self.state.rx[0].mode, dial);
         self.state.center_hz =
             if lsb { dial - self.audio_bw / 2.0 } else { dial + self.audio_bw / 2.0 };
         self.state.sample_rate = self.audio_bw;
@@ -8062,7 +8071,7 @@ impl Engine {
     fn control_mode(&self) -> Mode {
         let mode = self.state.rx[0].mode;
         if mode.sideband_follows_band()
-            && mode.is_lower_sideband_at(self.state.rx_freq_hz())
+            && self.state.is_lower_sideband(mode, self.state.rx_freq_hz())
             && !self.source.resolves_band_sideband()
         {
             Mode::Lsb
@@ -8083,8 +8092,15 @@ impl Engine {
         if !self.source.tracks_rx_mode() {
             return;
         }
-        let _ = self.source.set_control_mode(self.control_mode());
+        self.push_control_mode();
         self.push_control_filter();
+    }
+
+    /// Command the radio into [`Self::control_mode`], with the operator's own
+    /// sideband ahead of it for a radio that resolves the sideband itself.
+    fn push_control_mode(&mut self) {
+        self.source.set_forced_sideband(self.state.rade_lsb);
+        let _ = self.source.set_control_mode(self.control_mode());
     }
 
     /// Whether an operator's mode change has to reach the radio in front of us.
@@ -8658,7 +8674,7 @@ impl Engine {
     /// side of the dial the mode puts it.
     fn audio_band(&self) -> (f64, f64) {
         let dial = self.state.active_freq_hz();
-        if self.state.rx[0].mode.is_lower_sideband_at(dial) {
+        if self.state.is_lower_sideband(self.state.rx[0].mode, dial) {
             (dial - self.audio_bw, dial)
         } else {
             (dial, dial + self.audio_bw)
@@ -8861,7 +8877,7 @@ impl Engine {
             // audio f → dial+f (show the positive half); LSB → dial-f (negative
             // half). Both give the correct RF window over `audio_bw`.
             let dial = self.state.active_freq_hz();
-            let vp = if self.state.rx[0].mode.is_lower_sideband_at(dial) {
+            let vp = if self.state.is_lower_sideband(self.state.rx[0].mode, dial) {
                 (dial - self.audio_bw, dial)
             } else {
                 (dial, dial + self.audio_bw)
@@ -8966,7 +8982,7 @@ impl Engine {
     fn make_tx_frame(&mut self) -> SpectrumFrame {
         let dial = self.tx_center_hz;
         let bins = self.cfg.bins();
-        let lsb = self.state.rx[0].mode.is_lower_sideband_at(dial);
+        let lsb = self.state.is_lower_sideband(self.state.rx[0].mode, dial);
         let (floor, ceil) = (self.cfg.db_floor, self.cfg.db_ceil);
         // Attenuate the monitor for display by mapping through a window shifted
         // up by `off` dB (equivalent to attenuating the signal), so full-scale TX
@@ -9550,6 +9566,31 @@ impl Engine {
                 // apply unchanged.
                 self.state.tx.two_tone = on;
                 self.two_tone = TwoTone::default();
+                self.emit_state();
+            }
+            SetRadeSideband(lower) => {
+                let mode = self.state.rx[0].mode;
+                // Not under an over: the rig must not change sideband while it
+                // is transmitting.
+                if mode.is_rade() && !self.tx_active {
+                    let dial = self.state.rx_freq_hz();
+                    self.rade_lsb_band = Band::containing(dial);
+                    self.state.rade_lsb =
+                        (lower != mode.is_lower_sideband_at(dial)).then_some(lower);
+                    self.update_tuning();
+                }
+                self.emit_state();
+            }
+            FollowRadeSideband(station) => {
+                let mode = self.state.rx[0].mode;
+                if mode.is_rade() && !self.tx_active {
+                    let dial = self.state.rx_freq_hz();
+                    let usual = mode.is_lower_sideband_at(dial);
+                    let lower = station.unwrap_or(usual);
+                    self.rade_lsb_band = Band::containing(dial);
+                    self.state.rade_lsb = (lower != usual).then_some(lower);
+                    self.update_tuning();
+                }
                 self.emit_state();
             }
             SetPa(on) => {
@@ -15090,11 +15131,23 @@ impl Engine {
             }
             None => (tx_freq, in_rade, self.tx_active, own_version),
         };
+        // The sideband we transmit on, from whichever radio is being reported.
+        let own_lsb =
+            self.state.is_lower_sideband(sdroxide_types::Mode::Rade, self.state.tx_freq_hz());
+        let lsb = match self.rade_watch.as_ref() {
+            Some(w) => {
+                w.publish_sideband(self.instance, own_lsb);
+                if visible { w.lower_sideband() } else { own_lsb }
+            }
+            None => own_lsb,
+        };
         // Not during an over: the modem changes only once it has ended. And
         // ahead of the TX state, whose report names the version.
         if !tx {
             self.spots.set_reporter_version(version);
         }
+        // Ahead of the frequency: the two travel in one report.
+        self.spots.set_reporter_sideband(lsb);
         self.spots.set_reporter_freq(freq);
         self.spots.set_reporter_visible(visible);
         self.spots.set_reporter_tx(tx);
@@ -15505,12 +15558,12 @@ impl Engine {
         // `apply_control`, which applies the profile on the same terms.
         let profile =
             (self.state.rx[rx.index()].mode != mode).then(|| self.mode_profiles.effective(mode));
+        let (lo, hi) = self.state.filter_at(mode, dial);
         let r = &mut self.state.rx[rx.index()];
         r.mode = mode;
         if let Some(profile) = profile {
             profile.apply_to(r);
         }
-        let (lo, hi) = mode.default_filter_at(dial);
         (r.filter_lo, r.filter_hi) = (lo, hi);
         let snapshot = *r;
         // **A transmitter already on the air does not stay keyed into a
@@ -15538,7 +15591,7 @@ impl Engine {
         // commands the mode alone: we demodulate its 12 kHz IF, but that IF
         // comes through the filter its mode picks.
         if rx == RxId::Main && self.rig_follows_rx_mode() {
-            let _ = self.source.set_control_mode(self.control_mode());
+            self.push_control_mode();
             // After the mode, never before: every family expresses a filter in
             // terms of the mode the rig is in, so a width sent ahead of the
             // mode is a width measured against the old one. Self-guarded: a
@@ -18203,11 +18256,17 @@ impl Engine {
     /// doing the receiving. Every other mode's sideband is fixed, so this
     /// leaves them alone.
     fn follow_sideband(&mut self) {
+        // The operator's own RADE sideband is for the band it was chosen on.
+        if self.state.rade_lsb.is_some()
+            && Band::containing(self.state.rx_freq_hz()) != self.rade_lsb_band
+        {
+            self.state.rade_lsb = None;
+        }
         let mode = self.state.rx[0].mode;
         if !mode.sideband_follows_band() {
             return;
         }
-        let want = mode.default_filter_at(self.state.rx_freq_hz());
+        let want = self.state.filter_at(mode, self.state.rx_freq_hz());
         let r = &mut self.state.rx[0];
         if (r.filter_lo, r.filter_hi) == want {
             return;
@@ -18218,7 +18277,7 @@ impl Engine {
             d.set_filter(lo, hi);
         }
         if self.rig_follows_rx_mode() {
-            let _ = self.source.set_control_mode(self.control_mode());
+            self.push_control_mode();
             self.push_control_filter();
         }
         let _ = self.event_tx.send(RadioEvent::State(self.state.clone()));
@@ -18859,7 +18918,7 @@ impl Engine {
             // this session — otherwise the rig keeps its own (e.g. 0 % drive → no
             // output, or a stale/empty modulation). No-ops for IQ sources, which
             // apply mode and drive in the modulator chain instead.
-            let _ = self.source.set_control_mode(self.control_mode());
+            self.push_control_mode();
             self.source.set_tx_drive(self.tx_power_level() as f64);
             self.source.set_tune_drive(self.tx_tune_level() as f64);
             // In audio mode `tx_begin` just asserts CAT PTT; there is no
@@ -19918,7 +19977,8 @@ impl Engine {
             if self.state.tx.tune && self.state.tx.two_tone {
                 // The sideband at the transmit dial, which is where SSTV and
                 // RADE take theirs from on 160/80/40 m.
-                let lower = self.state.rx[0].mode.is_lower_sideband_at(self.state.tx_freq_hz());
+                let lower =
+                    self.state.is_lower_sideband(self.state.rx[0].mode, self.state.tx_freq_hz());
                 for t in &mut tone {
                     let (iq, audio) = self.two_tone.next_both(lower);
                     tx.mod_buf.push(iq * level);

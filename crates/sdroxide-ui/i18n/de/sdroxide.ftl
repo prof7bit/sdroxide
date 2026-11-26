@@ -4963,6 +4963,7 @@ rade-rade-v1-occupies-roughly-1060 = RADE V1 belegt etwa 750–2200 Hz des Durch
 rade-freedv-v2-digital-voice = FreeDV V2 digitale Sprache (experimentell)
 rade-tx-filter = TX-FILTER
 rade-tx-filter-tip = Begrenzt das Sende-Audio auf wenig mehr als die Träger des Signals: 650–2300 Hz bei V1, 950–2000 Hz bei V2. Weniger Störungen neben deinem Signal. Ausgeschaltet geht das Audio so hinaus, wie der Codec es erzeugt.
+rade-sideband-tip = Das Seitenband für RADE. Die Frequenz bleibt beim Umschalten stehen. Normalerweise folgt das Seitenband dem Band: unteres auf 160, 80 und 40 m, sonst oberes. Eine Wahl hier gilt, bis du das Band verlässt.
 rade-version-tip = Welche RADE-Wellenform empfangen und gesendet wird. Die beiden sind nicht kompatibel: Zu hören sind nur Stationen mit derselben Version. V2 ist experimentell. Beim Senden lässt sich nicht umschalten.
 rade-signal-too-high = ⚠ SIGNAL ZU HOCH
 rade-signal-too-low = ⚠ SIGNAL ZU TIEF

@@ -712,7 +712,7 @@ impl eframe::App for SdroxideApp {
                 (dial - half, dial + half)
             } else if mode.is_rf_paint() {
                 (dial + 150.0, dial + 3450.0)
-            } else if mode.is_lower_sideband_at(dial) {
+            } else if self.state.is_lower_sideband(mode, dial) {
                 // Mirrored, because the mode is: SSTV and RADE keep phone
                 // practice and ride the lower sideband on 160/80/40 m, so their
                 // sub-band is *below* the dial there. Framed above it, the
@@ -730,20 +730,31 @@ impl eframe::App for SdroxideApp {
             // keeps the operator's zoom.
             let locked = mode.is_slotted() || mode.is_wspr();
             let center = self.state.center_hz;
-            let mode_changed = self.digi_view_fit.map(|(m, _, _)| m) != Some(mode);
-            let dial_moved = self.digi_view_fit.map(|(_, d, _)| d) != Some(dial);
+            let lower = self.state.is_lower_sideband(mode, dial);
+            let mode_changed = self.digi_view_fit.map(|(m, ..)| m) != Some(mode);
+            let dial_moved = self.digi_view_fit.map(|(_, d, ..)| d) != Some(dial);
             // A retune moved the span the view has to live inside. Paired
             // with `!sub_visible` below rather than forcing a fit on its own:
             // an operator who panned the front end's window somewhere they
             // wanted to look should keep it, and only a window that no longer
             // contains the sub-band at all has to be re-fitted.
-            let span_moved = self.digi_view_fit.map(|(_, _, c)| c) != Some(center);
+            let span_moved = self.digi_view_fit.map(|(_, _, c, _)| c) != Some(center);
             let sub_visible = self.view.view_lo_hz < sub_hi && self.view.view_hi_hz > sub_lo;
             if locked || mode_changed || ((dial_moved || span_moved) && !sub_visible) {
                 self.view.view_lo_hz = sub_lo;
                 self.view.view_hi_hz = sub_hi;
+            } else if let Some((_, old_dial, _, was_lower)) = self.digi_view_fit
+                && was_lower != lower
+            {
+                // The sideband changed, and the signal's side of the dial with
+                // it. The old view may still overlap the new sub-band at its
+                // edge, so mirror it about the dial: the same audio range on
+                // the other side, at the operator's own zoom.
+                let (lo, hi) = (self.view.view_lo_hz, self.view.view_hi_hz);
+                self.view.view_lo_hz = dial - (hi - old_dial);
+                self.view.view_hi_hz = dial + (old_dial - lo);
             }
-            self.digi_view_fit = Some((mode, dial, center));
+            self.digi_view_fit = Some((mode, dial, center, lower));
             // The overlays, the cursor and the tone markers for this mode —
             // gathered in one place so an undocked panadapter window draws
             // exactly what this one would have.
@@ -1350,7 +1361,7 @@ impl SdroxideApp {
         // sideband (SSTV and RADE on 160/80/40 m) they all belong below it.
         // Display only: the controllers go on reporting an offset as a
         // width from the dial, whichever side they are being worked on.
-        let side = if mode.is_lower_sideband_at(dial) { -1.0 } else { 1.0 };
+        let side = if self.state.is_lower_sideband(mode, dial) { -1.0 } else { 1.0 };
         let audio_hz = side * self.digi_status.as_ref().map(|s| s.audio_hz).unwrap_or(1500.0);
         // RTTY shows mark/space tuning lines; Olivia the tone-bank edges;
         // PSK just the centre marker.

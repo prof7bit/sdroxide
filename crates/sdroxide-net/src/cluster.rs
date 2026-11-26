@@ -240,6 +240,7 @@ pub(crate) fn parse_dx_line(line: &str, now: i64) -> Option<Spot> {
     let mode = detect_mode(&comment);
     let freq_hz = freq_khz * 1000.0;
     Some(Spot {
+        lsb: None,
         id: Spot::make_id(SpotKind::DxCluster, &call, freq_hz),
         kind: SpotKind::DxCluster,
         freq_hz,

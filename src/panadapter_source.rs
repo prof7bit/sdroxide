@@ -698,6 +698,10 @@ impl IqSource for PanadapterSource {
         self.ctrl.set_control_mode(mode)
     }
 
+    fn set_forced_sideband(&mut self, lower: Option<bool>) {
+        self.ctrl.set_forced_sideband(lower);
+    }
+
     fn set_control_filter(&mut self, mode: Mode, lo_hz: f64, hi_hz: f64) {
         self.ctrl.set_control_filter(mode, lo_hz, hi_hz);
     }
