@@ -269,11 +269,14 @@ fn worker_transmits_an_over_that_decodes_back() {
 
 /// The End-of-Over frame must get out whole, whatever the length of the over
 /// leaves in the transmit resampler's last block, with the transmit filter and
-/// without it. Its callsign is the proof.
+/// without it, and a short silence must follow it. Its callsign is the proof of
+/// the first.
 #[test]
 fn the_end_of_every_over_gets_out() {
     let _g = exclusive();
     const AUDIO_RATE: f64 = 48_000.0;
+    /// 100 ms, give or take what the resampler's interpolation smears into it.
+    const SILENCE: std::ops::RangeInclusive<usize> = 4_700..=4_900;
     let (audio, _) = read_wav(&sample("david_vk5dgr.wav"));
     let mut mic = Vec::new();
     sdroxide_dsp::MonoResampler::new(SPEECH_RATE, AUDIO_RATE)
@@ -318,6 +321,11 @@ fn the_end_of_every_over_gets_out() {
         drop(worker);
 
         for (k, mut modem) in overs.into_iter().enumerate() {
+            let silence = modem.iter().rev().take_while(|s| s.abs() < 1e-4).count();
+            assert!(
+                SILENCE.contains(&silence),
+                "over {k}, filter {filter}: {silence} samples of silence at its end"
+            );
             modem.resize(modem.len() + AUDIO_RATE as usize / 2, 0.0);
             let mut down = Vec::new();
             sdroxide_dsp::MonoResampler::new(AUDIO_RATE, MODEM_RATE)

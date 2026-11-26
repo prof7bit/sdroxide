@@ -36,10 +36,16 @@ const RING_SECS: f64 = 1.0;
 const POLL: Duration = Duration::from_millis(5);
 /// Speech level decays this fast per output block, so the UI meter falls back.
 const LEVEL_DECAY: f32 = 0.85;
-/// Silence that pushes the end of an over out of the transmit resampler, in
-/// modem-rate samples. It converts whole blocks of 1024 only; this is more
-/// than one of them.
-const TX_DRAIN: usize = 1_100;
+/// The block the transmit resampler converts in, at its input rate: what it
+/// has less of than this stays in it. See [`MonoResampler`].
+const RESAMPLER_BLOCK: usize = 1024;
+/// Silence that follows the End-of-Over frame, in seconds. The transmitter is
+/// unkeyed once the audio has been handed over, give or take what the sound
+/// card and its driver still hold, so what the key may cut off has to be
+/// silence rather than the frame.
+const TX_TAIL_SECS: f64 = 0.1;
+/// Below this a sample at the end of an over counts as silence.
+const TX_SILENCE: f32 = 1e-4;
 /// The same fall-back on transmit, per 10 ms vocoder frame: [`LEVEL_DECAY`]
 /// once per 120 ms.
 const TX_LEVEL_DECAY: f32 = 0.987;
@@ -476,8 +482,7 @@ impl Inner {
                 warn!(?e, "rade_tx_eoo failed");
             }
             self.emit_tx_iq();
-            self.flush_tx_filter();
-            self.drain_tx_resampler();
+            self.finish_tx_audio();
             self.buf16.clear();
             self.tx_features.clear();
             while self.tx_in.pop().is_ok() {}
@@ -681,42 +686,51 @@ impl Inner {
         if self.tx_filter_on {
             self.tx_filter.process(&mut self.scratch);
         }
-        self.send_tx_audio();
+        self.resample_tx_audio();
+        self.queue_tx_audio();
     }
 
-    /// Bring out the end of the over, which the filter's delay still holds.
-    fn flush_tx_filter(&mut self) {
-        if !self.tx_filter_on {
-            return;
-        }
+    /// Get the whole of the over out, followed by [`TX_TAIL_SECS`] of silence.
+    ///
+    /// Silence is also what pushes the end of the over out of the transmit
+    /// filter's delay and out of the resampler, which converts whole blocks
+    /// only. Without the latter up to 128 ms stayed behind: the end of the
+    /// End-of-Over frame, with V1's callsign in it, which then went out ahead
+    /// of the next over instead.
+    fn finish_tx_audio(&mut self) {
+        let tail = (self.audio_rate * TX_TAIL_SECS) as usize;
+        let held = if self.tx_filter_on { self.tx_filter.tail_len() } else { 0 };
+        // What the filter holds, the tail, and a block more for the one that
+        // may stay in the resampler.
         self.scratch.clear();
-        self.scratch.resize(self.tx_filter.tail_len(), 0.0);
-        self.tx_filter.process(&mut self.scratch);
-        self.send_tx_audio();
-    }
-
-    /// Send what the resampler still holds of the over. Without this up to
-    /// 128 ms stayed behind: the end of the End-of-Over frame, and with it
-    /// V1's callsign, which then went out ahead of the next over instead.
-    fn drain_tx_resampler(&mut self) {
-        if self.tx_up.is_none() {
-            return;
+        self.scratch.resize(held + (MODEM_RATE * TX_TAIL_SECS) as usize + RESAMPLER_BLOCK, 0.0);
+        if self.tx_filter_on {
+            self.tx_filter.process(&mut self.scratch);
         }
-        self.scratch.clear();
-        self.scratch.resize(TX_DRAIN, 0.0);
-        self.send_tx_audio();
-        // A fresh one, so the next over does not begin with the leftover.
+        self.resample_tx_audio();
+        // How much silence that leaves depends on where the blocks fall, so cut
+        // it back to the tail.
+        let signal = self.audio.iter().rposition(|s| s.abs() >= TX_SILENCE).map_or(0, |i| i + 1);
+        self.audio.truncate(signal + tail);
+        self.queue_tx_audio();
+        // Fresh ones, so that the next over begins with neither the leftover
+        // silence nor the last of this over's microphone audio.
         self.tx_up = MonoResampler::new(MODEM_RATE, self.audio_rate);
+        self.tx_down = MonoResampler::new(self.audio_rate, SPEECH_RATE);
     }
 
-    /// Resample the modem-rate audio in `self.scratch` up for the transmit
-    /// chain.
-    fn send_tx_audio(&mut self) {
+    /// Resample the modem-rate audio in `self.scratch` into `self.audio`, at
+    /// the rate of the transmit chain.
+    fn resample_tx_audio(&mut self) {
         self.audio.clear();
         match self.tx_up.as_mut() {
             Some(r) => r.push(&self.scratch, &mut self.audio),
             None => self.audio.extend_from_slice(&self.scratch),
         }
+    }
+
+    /// Hand `self.audio` to the transmit chain.
+    fn queue_tx_audio(&mut self) {
         for &s in &self.audio {
             if self.tx_out.push(s.clamp(-1.0, 1.0)).is_err() {
                 let n = self.shared.dropped.fetch_add(1, Ordering::Relaxed) + 1;
