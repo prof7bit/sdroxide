@@ -625,7 +625,31 @@ pub struct CwStatus {
     pub sent_text: String,
 }
 
-/// Live state of the RADE V1 modem.
+/// Which RADE waveform the modem speaks.
+///
+/// The two are different waveforms: a receiver hears only the one it is set to,
+/// so both ends of a contact have to agree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum RadeVersion {
+    /// RADE V1, the released waveform.
+    #[default]
+    V1,
+    /// RADE V2. **Experimental**: FreeDV is still developing it, and a later
+    /// revision need not be compatible with this one.
+    V2,
+}
+
+impl RadeVersion {
+    /// What FreeDV Reporter calls this waveform.
+    pub fn reporter_mode(self) -> &'static str {
+        match self {
+            RadeVersion::V1 => "RADEV1",
+            RadeVersion::V2 => "RADEV2",
+        }
+    }
+}
+
+/// Live state of the RADE modem.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct RadeStatus {
     /// The receiver is locked to a signal.
@@ -642,6 +666,10 @@ pub struct RadeStatus {
     /// Samples dropped between the engine and the decode thread. Should stay
     /// at zero; anything else means the machine can't keep up.
     pub dropped: u64,
+    /// V2 tuning indicator: it only syncs within about 31 Hz, and while a
+    /// signal sits further off than that this is +1 when its audio is too
+    /// high and -1 when too low. Otherwise, and always on V1, 0.
+    pub mistune: i8,
 }
 
 /// The speed a packet station is running.
@@ -2997,6 +3025,10 @@ pub struct DigiConfig {
     /// shares the front end and adds a code, an interleaver or more carriers.
     #[serde(default)]
     pub psk_coded: PskCoded,
+    /// RADE: which waveform to receive and transmit. A change made during an
+    /// over takes effect once it has ended.
+    #[serde(default)]
+    pub rade_version: RadeVersion,
 }
 
 fn default_tnc_host_port() -> u16 {
@@ -3267,6 +3299,7 @@ impl Default for DigiConfig {
             psk_speed: PskSpeed::default(),
             psk_modulation: PskModulation::default(),
             psk_coded: PskCoded::default(),
+            rade_version: RadeVersion::default(),
         }
     }
 }

@@ -4958,6 +4958,13 @@ rade-stop-talking = SPRECHEN STOPPEN
 rade-talk-ptt = SPRECHEN (PTT)
 rade-open-close-rade-over-modem = Eine RADE-Aussendung öffnen oder schließen. Das Modem braucht etwa 120 ms Sprache, bevor der erste Rahmen hinausgeht, und sendet beim Aufhören einen End-of-Over-Rahmen, daher läuft das Senden ein wenig über den Knopf hinaus.
 rade-rade-v1-occupies-roughly-1060 = RADE V1 belegt etwa 1060–1880 Hz des Durchlassbereichs — oberes Seitenband, oder unteres auf 160, 80 und 40 m, wo RADE die Sprechübung behält und sdroxide für Sie umschaltet. Das Signal in das schattierte Band auf dem Wasserfall legen; das Modem findet es von dort aus.
+rade-freedv-v2-digital-voice = FreeDV V2 digitale Sprache (experimentell)
+rade-version-tip = Welche RADE-Wellenform empfangen und gesendet wird. Die beiden sind nicht kompatibel: Zu hören sind nur Stationen mit derselben Version. V2 ist experimentell. Beim Senden lässt sich nicht umschalten.
+rade-signal-too-high = ⚠ SIGNAL ZU HOCH
+rade-signal-too-low = ⚠ SIGNAL ZU TIEF
+rade-mistune-tip = V2 synchronisiert nur innerhalb von etwa 31 Hz. Es wurde ein Signal erkannt, das weiter danebenliegt: abstimmen, bis sich sein Ton in die andere Richtung verschiebt. Im oberen Seitenband bei „zu hoch“ die Frequenz erhöhen, im unteren verringern.
+rade-callsign-station-sends-v2 = Das Rufzeichen, das die Station neben der Sprache mitsendet; es wiederholt sich beim Senden alle paar Sekunden. Es wird auch an den FreeDV Reporter gemeldet.
+rade-v2-experimental-note = ⚠ RADE V2 ist experimentell: FreeDV entwickelt es noch, rät derzeit vom Betrieb on air ab, und eine spätere Fassung muss nicht kompatibel sein. Es belegt etwa 1030–1910 Hz, und zum Synchronisieren muss die Frequenz auf etwa 31 Hz stimmen.
 
 ## frame (src/app/frame.rs)
 

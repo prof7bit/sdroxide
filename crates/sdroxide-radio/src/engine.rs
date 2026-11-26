@@ -15076,19 +15076,25 @@ impl Engine {
         // *is* the station.
         let in_rade = self.state.rx[0].mode.is_rade();
         let tx_freq = self.state.tx_freq_hz().round().max(0.0) as u64;
-        let (freq, visible, tx) = match self.rade_watch.as_ref() {
+        let own_version = self.digi_config.rade_version;
+        let (freq, visible, tx, version) = match self.rade_watch.as_ref() {
             Some(w) => {
-                w.publish(self.instance, in_rade, tx_freq, self.tx_active);
+                w.publish(self.instance, in_rade, tx_freq, self.tx_active, own_version);
                 match w.reported() {
                     // Nobody on FreeDV: hidden, and the frequency stops
                     // mattering — keep pushing our own so a station that comes
                     // back to RADE has something current to show.
-                    None => (tx_freq, false, self.tx_active),
-                    Some((f, t)) => (f, true, t),
+                    None => (tx_freq, false, self.tx_active, own_version),
+                    Some((f, t, v)) => (f, true, t, v),
                 }
             }
-            None => (tx_freq, in_rade, self.tx_active),
+            None => (tx_freq, in_rade, self.tx_active, own_version),
         };
+        // Not during an over: the modem changes only once it has ended. And
+        // ahead of the TX state, whose report names the version.
+        if !tx {
+            self.spots.set_reporter_version(version);
+        }
         self.spots.set_reporter_freq(freq);
         self.spots.set_reporter_visible(visible);
         self.spots.set_reporter_tx(tx);

@@ -12,6 +12,7 @@ license.workspace = true
 
 [dependencies]
 sdroxide-dsp.workspace = true
+sdroxide-types.workspace = true
 num-complex.workspace = true
 crossbeam-channel.workspace = true
 rtrb.workspace = true

@@ -365,3 +365,95 @@ fn worker_survives_chunk_sizes_unrelated_to_nin() {
     let peak = speech.iter().fold(0.0f32, |a, s| a.max(s.abs()));
     assert!(peak > 0.05, "decoded speech peaked at only {peak}");
 }
+
+/// V2 end to end through the worker, both ways: microphone in, modulated audio
+/// out, and a second worker that has to sync on it, produce speech and recover
+/// the callsign from the data symbols. Then V1 again in the same process, as
+/// the panel's switch does it.
+#[test]
+fn v2_over_decodes_back_with_its_callsign() {
+    use sdroxide_rade::RadeVersion;
+    use std::time::{Duration, Instant};
+
+    let _g = exclusive();
+    const AUDIO_RATE: f64 = 48_000.0;
+    const CALL: &str = "AA1ZZZ";
+    let (audio, rate) = read_wav(&sample("david_vk5dgr.wav"));
+    assert_eq!(rate, SPEECH_RATE);
+    let mut mic = Vec::new();
+    sdroxide_dsp::MonoResampler::new(SPEECH_RATE, AUDIO_RATE)
+        .expect("upsampler")
+        .push(&audio, &mut mic);
+    let block = (AUDIO_RATE / 100.0) as usize;
+
+    let mut modem = Vec::new();
+    {
+        let mut worker =
+            RadeWorker::with_version(RadeVersion::V2, AUDIO_RATE, AUDIO_RATE).expect("worker");
+        worker.set_callsign(CALL);
+        worker.set_tx(true);
+        let mut out = vec![0.0f32; block];
+        for chunk in mic.chunks(block) {
+            while worker.tx_pending() > block * 10 {
+                let n = worker.pop_tx(&mut out);
+                modem.extend_from_slice(&out[..n]);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            worker.push_mic(chunk);
+            let n = worker.pop_tx(&mut out);
+            modem.extend_from_slice(&out[..n]);
+        }
+        worker.set_tx(false);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !worker.tx_drained() && Instant::now() < deadline {
+            let n = worker.pop_tx(&mut out);
+            modem.extend_from_slice(&out[..n]);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(worker.tx_drained(), "transmit never drained after releasing");
+        assert_eq!(worker.stats().dropped, 0);
+    }
+    let sent_s = modem.len() as f64 / AUDIO_RATE;
+    let speech_s = audio.len() as f64 / SPEECH_RATE;
+    assert!((sent_s - speech_s).abs() < 1.0, "sent {sent_s:.1} s for {speech_s:.1} s of speech");
+    modem.resize(modem.len() + AUDIO_RATE as usize, 0.0);
+
+    let mut worker =
+        RadeWorker::with_version(RadeVersion::V2, AUDIO_RATE, AUDIO_RATE).expect("worker");
+    let (mut speech, mut calls, mut synced) = (Vec::new(), Vec::new(), false);
+    for chunk in modem.chunks(block) {
+        // A second of ring; stay well inside it, and give the worker time.
+        while worker.rx_free() < AUDIO_RATE as usize / 2 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        worker.push_rx(chunk);
+        std::thread::sleep(Duration::from_millis(1));
+        synced |= worker.stats().sync;
+        worker.pop_rx(&mut speech);
+        calls.extend(worker.poll_text());
+    }
+    for _ in 0..100 {
+        std::thread::sleep(Duration::from_millis(5));
+        worker.pop_rx(&mut speech);
+        calls.extend(worker.poll_text());
+    }
+    let stats = worker.stats();
+    eprintln!(
+        "V2: {sent_s:.1} s sent, {:.1} s speech decoded, {} eoo, {} callsign reports",
+        speech.len() as f64 / AUDIO_RATE,
+        stats.eoo_count,
+        calls.len()
+    );
+    assert!(synced, "the V2 over never synced");
+    assert!(speech.len() as f64 / AUDIO_RATE > speech_s * 0.8, "too little speech decoded");
+    assert!(speech.iter().any(|s| s.abs() > 0.05), "decoded speech is silent");
+    assert!(stats.eoo_count > 0, "the end-of-over frame was not detected");
+    assert!(!calls.is_empty(), "no callsign recovered");
+    assert!(calls.iter().all(|c| c.call == CALL), "{calls:?}");
+    assert_eq!(stats.dropped, 0);
+    drop(worker);
+
+    drop(Rade::open(RadeVersion::V1).expect("V1 after V2"));
+    let v2 = Rade::open(RadeVersion::V2).expect("V2 after V1");
+    assert_eq!(v2.n_eoo_bits(), 0);
+}

@@ -67,6 +67,18 @@ fn main() {
     }
     shim.compile("sdroxide_rade_shim");
 
+    // The callsign protocol of RADE V2, which lives in FreeDV's backend rather
+    // than in librade. Vendored unmodified; see cpp/README.md.
+    cc::Build::new()
+        .cpp(true)
+        .std("c++20")
+        .file(manifest.join("cpp/pipeline/rade_text.cpp"))
+        .include(manifest.join("cpp/pipeline"))
+        .opt_level(2)
+        // Its warnings are upstream's business.
+        .warnings(false)
+        .compile("sdroxide_rade_text_v2");
+
     println!("cargo:rustc-link-search=native={}", build.display());
     println!("cargo:rustc-link-lib=static=rade_static");
     println!("cargo:rustc-link-search=native={}", opus_lib_dir.display());
@@ -99,6 +111,7 @@ fn main() {
 
     println!("cargo:rerun-if-changed=src/shim.c");
     println!("cargo:rerun-if-changed=src/shim.h");
+    println!("cargo:rerun-if-changed=cpp");
     println!("cargo:rerun-if-changed={}", rade_c.join("src").display());
     println!("cargo:rerun-if-changed={}", rade_c.join("cmake").display());
 }

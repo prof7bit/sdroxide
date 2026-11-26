@@ -37,13 +37,13 @@ use serde_json::{Value, json};
 use tracing::{debug, info, warn};
 use tungstenite::{Message, WebSocket};
 
-use sdroxide_types::{FreeDvReporterConfig, Spot, SpotKind};
+use sdroxide_types::{FreeDvReporterConfig, RadeVersion, Spot, SpotKind};
 
 use crate::event::{EventTx, FeedTx, NetEvent};
 use crate::socketio::{self, Frame};
 
-/// The mode string FreeDV Reporter uses for RADE V1. It is the only waveform
-/// sdroxide speaks, so it is a constant rather than derived from the radio.
+/// What a station on the roster is taken to run when the server names no mode.
+/// What we report as our own follows [`RadeVersion::reporter_mode`].
 const MODE_STRING: &str = "RADEV1";
 
 /// The reporter protocol revision this client implements.
@@ -94,6 +94,8 @@ type Ws = WebSocket<Sock>;
 enum Ctrl {
     Freq(u64),
     Tx(bool),
+    /// The RADE version in use, which every report names.
+    Version(RadeVersion),
     /// `true` = `show_self`, `false` = `hide_self`. The engine pushes
     /// `mode.is_rade()`.
     Visible(bool),
@@ -153,6 +155,9 @@ impl ReporterHandle {
     }
     pub fn set_tx(&self, on: bool) {
         let _ = self.ctrl.send(Ctrl::Tx(on));
+    }
+    pub fn set_version(&self, version: RadeVersion) {
+        let _ = self.ctrl.send(Ctrl::Version(version));
     }
     pub fn set_visible(&self, visible: bool) {
         let _ = self.ctrl.send(Ctrl::Visible(visible));
@@ -371,6 +376,7 @@ struct Reporter {
     // ── Desired state, always current whether or not we are connected.
     freq: u64,
     tx: bool,
+    version: RadeVersion,
     message: String,
     /// Starts false: we must not appear publicly before the engine has told us
     /// the radio is actually in RADE.
@@ -427,6 +433,7 @@ impl Reporter {
             ctrl,
             freq: 0,
             tx: false,
+            version: RadeVersion::default(),
             message,
             visible: false,
             ws: None,
@@ -748,6 +755,13 @@ impl Reporter {
                     self.emit_tx();
                 }
             }
+            Ctrl::Version(v) => {
+                if v != self.version {
+                    self.version = v;
+                    // The mode travels in `tx_report`.
+                    self.emit_tx();
+                }
+            }
             Ctrl::Message(m) => {
                 if m != self.message {
                     self.message = m;
@@ -822,7 +836,10 @@ impl Reporter {
         if self.fully_connected {
             self.report(socketio::emit(
                 "tx_report",
-                Some(&json!({ "mode": MODE_STRING, "transmitting": self.tx })),
+                Some(&json!({
+                    "mode": self.version.reporter_mode(),
+                    "transmitting": self.tx,
+                })),
             ));
         }
     }
@@ -841,7 +858,7 @@ impl Reporter {
             return;
         }
         info!(%call, snr, "reporting RX callsign to FreeDV Reporter");
-        let frame = rx_report_frame(call, snr);
+        let frame = rx_report_frame(self.version, call, snr);
         self.report(frame);
     }
 
@@ -859,7 +876,7 @@ impl Reporter {
         if !self.fully_connected || !self.can_report() {
             return;
         }
-        let frame = rx_report_frame("", snr);
+        let frame = rx_report_frame(self.version, "", snr);
         self.report(frame);
     }
 
@@ -926,21 +943,25 @@ impl Reporter {
     }
 }
 
+/// Marks this as a private build, so that nobody takes what it does on the air
+/// for the release of the same number.
+const BUILD_TAG: &str = "radev2-test-DD4UG";
+
 /// What we tell the reporter we are running.
 fn software_version() -> String {
-    format!("SDRoxide {}", env!("CARGO_PKG_VERSION"))
+    format!("SDRoxide {}+{BUILD_TAG}", env!("CARGO_PKG_VERSION"))
 }
 
 /// One `rx_report` frame. An empty `callsign` is an unidentified reception
 /// ("hearing something"); a callsign is a decoded station, upper-cased for the
 /// site. Shared by [`Reporter::emit_rx_report`] and
 /// [`Reporter::emit_rx_presence`] so the two cannot drift in shape.
-fn rx_report_frame(call: &str, snr: i32) -> String {
+fn rx_report_frame(version: RadeVersion, call: &str, snr: i32) -> String {
     socketio::emit(
         "rx_report",
         Some(&json!({
             "callsign": call.trim().to_uppercase(),
-            "mode": MODE_STRING,
+            "mode": version.reporter_mode(),
             "snr": snr,
         })),
     )
@@ -1268,7 +1289,18 @@ mod tests {
 
     #[test]
     fn software_version_is_branded() {
-        assert_eq!(software_version(), format!("SDRoxide {}", env!("CARGO_PKG_VERSION")));
+        assert_eq!(
+            software_version(),
+            format!("SDRoxide {}+{BUILD_TAG}", env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    #[test]
+    fn reports_name_the_rade_version_in_use() {
+        for (version, mode) in [(RadeVersion::V1, "RADEV1"), (RadeVersion::V2, "RADEV2")] {
+            let frame = rx_report_frame(version, "k1abc", 3);
+            assert!(frame.contains(&format!("\"mode\":\"{mode}\"")), "{frame}");
+        }
     }
 
     #[test]
@@ -1276,12 +1308,12 @@ mod tests {
         // The presence report is distinguished from a decoded one only by its
         // empty callsign: that is what tells the server — and every listener —
         // that nobody has been identified, so it can never mis-credit a decode.
-        let presence = rx_report_frame("", -7);
+        let presence = rx_report_frame(RadeVersion::V1, "", -7);
         assert!(
             presence.contains("\"callsign\":\"\"") && presence.contains("\"snr\":-7"),
             "presence frame was {presence}"
         );
-        let named = rx_report_frame("k1abc", -7);
+        let named = rx_report_frame(RadeVersion::V1, "k1abc", -7);
         assert!(
             named.contains("\"callsign\":\"K1ABC\"") && named.contains("\"mode\":\"RADEV1\""),
             "named frame was {named}"

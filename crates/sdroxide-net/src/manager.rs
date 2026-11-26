@@ -10,7 +10,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crossbeam_channel::Receiver;
 use sdroxide_types::{
-    NetworkConfig, Spot, SpotKind, UploadResult, UploadTarget, WsprSpot, grid_to_latlon,
+    NetworkConfig, RadeVersion, Spot, SpotKind, UploadResult, UploadTarget, WsprSpot,
+    grid_to_latlon,
 };
 
 use crate::cluster::ClusterHandle;
@@ -66,6 +67,7 @@ pub struct SpotManager {
     /// so a config change never leaves the site showing a stale frequency.
     rep_freq: u64,
     rep_tx: bool,
+    rep_version: RadeVersion,
     rep_visible: bool,
 
     /// Whether this manager may hold the station's long-lived feeds.
@@ -114,6 +116,7 @@ impl SpotManager {
             freedv: None,
             rep_freq: 0,
             rep_tx: false,
+            rep_version: RadeVersion::default(),
             rep_visible: false,
             station: true,
             wavelog: std::sync::OnceLock::new(),
@@ -225,6 +228,17 @@ impl SpotManager {
         self.rep_tx = on;
         if let Some(h) = &self.freedv {
             h.set_tx(on);
+        }
+    }
+
+    /// Tell the FreeDV Reporter which RADE version we are on.
+    pub fn set_reporter_version(&mut self, version: RadeVersion) {
+        if version == self.rep_version {
+            return;
+        }
+        self.rep_version = version;
+        if let Some(h) = &self.freedv {
+            h.set_version(version);
         }
     }
 
@@ -724,6 +738,7 @@ impl SpotManager {
         );
         // Replay what the engine last told us, so the new session starts with
         // the current picture instead of waiting for the next change.
+        h.set_version(self.rep_version);
         h.set_freq(self.rep_freq);
         h.set_tx(self.rep_tx);
         h.set_visible(self.rep_visible);

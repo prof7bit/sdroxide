@@ -20,7 +20,9 @@
 use std::time::SystemTime;
 
 use sdroxide_rade::RadeWorker;
-use sdroxide_types::{DigiConfig, DigiStatus, Mode, QsoStep, RadeStatus, TranscriptLine};
+use sdroxide_types::{
+    DigiConfig, DigiStatus, Mode, QsoStep, RadeStatus, RadeVersion, TranscriptLine,
+};
 use tracing::error;
 
 use crate::DigiEngine;
@@ -45,6 +47,15 @@ pub struct RadeController {
     /// `None` when the modem could not be opened — the mode then behaves as a
     /// plain SSB receiver rather than taking the app down.
     worker: Option<RadeWorker>,
+    /// The version `worker` speaks (or failed to open as). Differs from
+    /// `cfg.rade_version` only while a change waits for the over to end.
+    version: RadeVersion,
+    /// The demod tap rate, kept to start a new worker on a version change.
+    tap_rate: f64,
+    /// V2 only: the station we are in sync with has named itself, so no
+    /// anonymous reception report may follow.
+    named: bool,
+    eoo_seen: u64,
 
     tx_active: bool,
     keyed: bool,
@@ -71,20 +82,16 @@ pub struct RadeController {
 
 impl RadeController {
     pub fn new(cfg: DigiConfig, tap_rate: f64) -> Self {
-        let worker = match RadeWorker::new(tap_rate, OUT_RATE) {
-            Ok(w) => Some(w),
-            Err(e) => {
-                error!(?e, "could not start the RADE modem; audio will pass through");
-                None
-            }
-        };
-        if let Some(w) = worker.as_ref() {
-            w.set_callsign(&cfg.my_call);
-        }
+        let version = cfg.rade_version;
+        let worker = start_worker(&cfg, tap_rate);
         let last_status = build_status(&cfg, false, None, None);
         RadeController {
             cfg,
             worker,
+            version,
+            tap_rate,
+            named: false,
+            eoo_seen: 0,
             tx_active: false,
             keyed: false,
             tx_done: false,
@@ -95,6 +102,42 @@ impl RadeController {
             last_status,
             status_dirty: true,
         }
+    }
+}
+
+fn start_worker(cfg: &DigiConfig, tap_rate: f64) -> Option<RadeWorker> {
+    match RadeWorker::with_version(cfg.rade_version, tap_rate, OUT_RATE) {
+        Ok(w) => {
+            w.set_callsign(&cfg.my_call);
+            Some(w)
+        }
+        Err(e) => {
+            error!(?e, version = ?cfg.rade_version,
+                "could not start the RADE modem; audio will pass through");
+            None
+        }
+    }
+}
+
+impl RadeController {
+    /// Bring the modem to the configured version, if it differs and no over
+    /// of ours is in progress: replacing it mid-over would cut the
+    /// transmission off without its end-of-over frame.
+    fn apply_version(&mut self) {
+        if self.version == self.cfg.rade_version || self.keyed || self.tx_active {
+            return;
+        }
+        // The old one first: the library wrapper allows only one at a time.
+        self.worker = None;
+        self.worker = start_worker(&self.cfg, self.tap_rate);
+        self.version = self.cfg.rade_version;
+        self.tx_done = false;
+        self.last_dx_call = None;
+        self.dx_call_at = None;
+        self.presence_at = None;
+        self.named = false;
+        self.eoo_seen = 0;
+        self.status_dirty = true;
     }
 }
 
@@ -182,6 +225,8 @@ impl DigiEngine for RadeController {
     fn poll(&mut self, now: SystemTime, dial_hz: f64) -> Vec<DigiAction> {
         let mut actions = Vec::new();
         self.dial_hz = dial_hz;
+        // A change that arrived during an over.
+        self.apply_version();
         if self.tx_active && !self.keyed {
             self.keyed = true;
             self.tx_done = false;
@@ -198,6 +243,7 @@ impl DigiEngine for RadeController {
                 self.dx_call_at = Some(now);
                 self.status_dirty = true;
                 identified = true;
+                self.named = self.version == RadeVersion::V2;
                 actions.push(DigiAction::RadeCallsign {
                     call: t.call,
                     snr_db: t.snr_db,
@@ -213,6 +259,13 @@ impl DigiEngine for RadeController {
         // station in sync for a minute would otherwise send a report every
         // poll. FreeDV GUI does the same, with an empty callsign.
         if let Some(st) = rade {
+            // The end of that station's over, or of our hearing it.
+            if !st.sync || self.keyed || st.eoo_count != self.eoo_seen {
+                self.eoo_seen = st.eoo_count;
+                // A callsign decoded on this very pass belongs to what is
+                // being heard now.
+                self.named &= identified;
+            }
             if st.sync && !self.keyed {
                 let due = self
                     .presence_at
@@ -225,7 +278,7 @@ impl DigiEngine for RadeController {
                 // so the named report stands for this interval.
                 if identified {
                     self.presence_at = Some(now);
-                } else if due {
+                } else if due && !self.named {
                     self.presence_at = Some(now);
                     actions.push(DigiAction::RadePresence { snr_db: st.snr_db });
                 }
@@ -341,6 +394,7 @@ impl DigiEngine for RadeController {
             w.set_callsign(&cfg.my_call);
         }
         self.cfg = cfg;
+        self.apply_version();
         self.status_dirty = true;
     }
 
@@ -388,19 +442,65 @@ fn stats_of(w: &RadeWorker) -> RadeStatus {
         rx_level: s.rx_level,
         eoo_count: s.eoo_count,
         dropped: s.dropped,
+        mistune: s.mistune,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
     use std::time::{Duration, Instant};
+
+    /// One RADE context per process, and these tests share one.
+    static LOCK: Mutex<()> = Mutex::new(());
+    fn exclusive() -> MutexGuard<'static, ()> {
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     /// Issue #614: microphone audio kept arriving through the end-of-over tail,
     /// into a ring the worker no longer read. It opened the next over and grew
     /// until it overflowed into the "samples dropped" warning.
+    /// A version change replaces the modem while receiving, and waits while
+    /// an over of ours is on the air.
+    #[test]
+    fn version_change_waits_for_the_over_to_end() {
+        let _g = exclusive();
+        let mut c = RadeController::new(DigiConfig::default(), 48_000.0);
+        if c.worker.is_none() {
+            return; // no modem on this machine; nothing to test
+        }
+        let with = |v| DigiConfig { rade_version: v, ..DigiConfig::default() };
+
+        // Back and forth while receiving: each one must come up.
+        for v in [RadeVersion::V2, RadeVersion::V1, RadeVersion::V2, RadeVersion::V1] {
+            c.set_config(with(v));
+            assert_eq!(c.version, v);
+            assert!(c.worker.is_some(), "no modem after switching to {v:?}");
+        }
+
+        c.set_tx_active(true);
+        let _ = c.poll(SystemTime::now(), 14_236_000.0);
+        c.set_config(with(RadeVersion::V2));
+        assert_eq!(c.version, RadeVersion::V1, "switched in mid-over");
+        c.set_tx_active(false);
+        let _ = c.poll(SystemTime::now(), 14_236_000.0);
+        assert_eq!(c.version, RadeVersion::V1, "switched during the tail");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut out = vec![0.0f32; 4_800];
+        while !c.fill_tx_block(&mut out) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        c.on_burst_done();
+        let _ = c.poll(SystemTime::now(), 14_236_000.0);
+        assert_eq!(c.version, RadeVersion::V2);
+        assert!(c.worker.is_some());
+    }
+
     #[test]
     fn mic_audio_after_release_is_not_queued_for_the_next_over() {
+        let _g = exclusive();
         let mut c = RadeController::new(DigiConfig::default(), 48_000.0);
         if c.worker.is_none() {
             return; // no modem on this machine; nothing to test

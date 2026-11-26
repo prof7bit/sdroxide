@@ -1783,7 +1783,11 @@ use sdroxide_types::{
 /// v225: the Hermes-Lite 2's PA switch per band. `RadioState` gains
 /// `pa_enable` on its tail, which changes every state frame, and `Command`
 /// gains a trailing `SetPa`.
-pub const PROTO_VERSION: u16 = 225;
+///
+/// v226: RADE V2. `DigiConfig` gains `rade_version` on its tail, which changes
+/// `Command::SetDigiConfig` and every `DigiStatus`, and `RadeStatus` gains
+/// `mistune` on its tail, so a v225 peer fails to decode either.
+pub const PROTO_VERSION: u16 = 226;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

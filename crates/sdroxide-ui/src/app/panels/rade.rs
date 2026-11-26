@@ -6,7 +6,7 @@
 
 use crate::i18n::tr;
 use eframe::egui::{self, RichText};
-use sdroxide_types::Command;
+use sdroxide_types::{Command, RadeVersion};
 
 use crate::app::{SdroxideApp, tx_gated};
 
@@ -26,16 +26,41 @@ impl SdroxideApp {
         // operator. It is `None` while transmitting: our own over is not a
         // station being heard.
         let dx_call = status.as_ref().and_then(|s| s.dx_call.clone());
+        let version = self.digi_cfg_edit.rade_version;
+        let v2 = version == RadeVersion::V2;
 
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(tr!("rade-rade")).size(11.0).strong().color(crate::theme::CYAN()),
             );
             ui.label(
-                RichText::new(tr!("rade-freedv-v1-digital-voice"))
-                    .size(10.5)
-                    .color(crate::theme::CYAN_DIM()),
+                RichText::new(if v2 {
+                    tr!("rade-freedv-v2-digital-voice")
+                } else {
+                    tr!("rade-freedv-v1-digital-voice")
+                })
+                .size(10.5)
+                .color(crate::theme::CYAN_DIM()),
             );
+            ui.add_space(8.0);
+            // Which waveform. Held while transmitting: the modem only changes
+            // between overs. "V1" and "V2" are names, so not translated.
+            ui.add_enabled_ui(!transmitting && self.digi_cfg_seeded, |ui| {
+                ui.horizontal(|ui| {
+                    for (choice, name) in [(RadeVersion::V1, "V1"), (RadeVersion::V2, "V2")] {
+                        let resp = crate::chrome::chip(
+                            ui,
+                            version == choice,
+                            RichText::new(name).size(10.5),
+                        );
+                        if resp.clicked() && version != choice {
+                            self.digi_cfg_edit.rade_version = choice;
+                            cmds.push(Command::SetDigiConfig(self.digi_cfg_edit.clone()));
+                        }
+                        resp.on_hover_text(tr!("rade-version-tip"));
+                    }
+                });
+            });
             crate::chrome::row_tail(ui, |ui| {
                 if transmitting {
                     ui.label(
@@ -108,6 +133,20 @@ impl SdroxideApp {
             } else {
                 ui.label(RichText::new(tr!("rade-snr")).size(12.0).color(dim));
             }
+            if rade.mistune != 0 && !rade.sync && !transmitting {
+                ui.add_space(12.0);
+                ui.label(
+                    RichText::new(if rade.mistune > 0 {
+                        tr!("rade-signal-too-high")
+                    } else {
+                        tr!("rade-signal-too-low")
+                    })
+                    .size(12.0)
+                    .strong()
+                    .color(crate::theme::YELLOW()),
+                )
+                .on_hover_text(tr!("rade-mistune-tip"));
+            }
             // Who we last heard, from the End-of-Over frame that closed their
             // over — the only time a RADE station names itself. Held for a
             // minute past the signal, then dropped by the controller.
@@ -119,7 +158,11 @@ impl SdroxideApp {
                         .strong()
                         .color(crate::theme::GREEN()),
                 )
-                .on_hover_text(tr!("rade-callsign-station-put-end-over"));
+                .on_hover_text(if v2 {
+                    tr!("rade-callsign-station-sends-v2")
+                } else {
+                    tr!("rade-callsign-station-put-end-over")
+                });
             }
         });
         ui.add_space(8.0);
@@ -162,9 +205,13 @@ impl SdroxideApp {
         ui.add_space(12.0);
 
         ui.label(
-            RichText::new(tr!("rade-rade-v1-occupies-roughly-1060"))
-                .size(10.5)
-                .color(crate::theme::gray(125)),
+            RichText::new(if v2 {
+                tr!("rade-v2-experimental-note")
+            } else {
+                tr!("rade-rade-v1-occupies-roughly-1060")
+            })
+            .size(10.5)
+            .color(crate::theme::gray(125)),
         );
         if rade.dropped > 0 {
             ui.add_space(6.0);

@@ -5088,6 +5088,13 @@ rade-stop-talking = STOP TALKING
 rade-talk-ptt = TALK (PTT)
 rade-open-close-rade-over-modem = Open or close a RADE over. The modem needs ~120 ms of speech before the first frame goes out, and sends an end-of-over frame when you stop, so transmit runs on a little past the button.
 rade-rade-v1-occupies-roughly-1060 = RADE V1 occupies roughly 1060–1880 Hz of the passband — upper sideband, or lower on 160, 80 and 40 m, where RADE keeps phone practice and sdroxide switches for you. Put the signal inside the shaded band on the waterfall; the modem finds it from there.
+rade-freedv-v2-digital-voice = FreeDV V2 digital voice (experimental)
+rade-version-tip = Which RADE waveform to receive and transmit. The two are not compatible: you only hear stations on the same version. V2 is experimental. It cannot be changed while transmitting.
+rade-signal-too-high = ⚠ SIGNAL TOO HIGH
+rade-signal-too-low = ⚠ SIGNAL TOO LOW
+rade-mistune-tip = V2 only syncs within about 31 Hz. A signal further off than that has been detected: tune until its audio moves the other way. On upper sideband, tune up if it is too high; on lower sideband, tune down.
+rade-callsign-station-sends-v2 = The callsign the station streams alongside its speech, repeated every few seconds while it transmits. It is also what is reported to FreeDV Reporter.
+rade-v2-experimental-note = ⚠ RADE V2 is experimental: FreeDV is still developing it, advises against using it on the air yet, and a later revision need not be compatible. It occupies roughly 1030–1910 Hz, and the dial must be within about 31 Hz for it to sync.
 
 ## frame (src/app/frame.rs)
 

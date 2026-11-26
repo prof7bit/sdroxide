@@ -1,5 +1,5 @@
-//! Safe Rust wrapper around FreeDV **RADE V1** (Radio Autoencoder) — a neural
-//! speech codec plus OFDM waveform that carries intelligible voice at SNRs
+//! Safe Rust wrapper around FreeDV **RADE** (Radio Autoencoder), V1 and the
+//! experimental V2 — a neural speech codec plus OFDM waveform that carries intelligible voice at SNRs
 //! where SSB is not usable.
 //!
 //! The C library is vendored at `vendor/rade_c` (upstream
@@ -20,9 +20,11 @@
 
 mod sys;
 pub mod text;
+pub mod text_v2;
 pub mod vocoder;
 mod worker;
 
+pub use sdroxide_types::RadeVersion;
 pub use vocoder::{VocoderDec, VocoderEnc};
 pub use worker::{RadeStats, RadeTextRx, RadeWorker};
 
@@ -90,7 +92,7 @@ pub enum RadeError {
 static INIT: Once = Once::new();
 static OPEN: AtomicBool = AtomicBool::new(false);
 
-/// One RADE V1 context: one transmitter and one receiver.
+/// One RADE context: one transmitter and one receiver, of one version.
 ///
 /// `Send` but deliberately **not** `Sync` — one instance belongs to one
 /// thread, which for the engine is [`RadeWorker`]'s thread.
@@ -119,12 +121,17 @@ pub struct RxOut {
 }
 
 impl Rade {
-    /// Open the single RADE V1 context, using the weights compiled into the
-    /// library.
+    /// [`Rade::open`] for V1.
+    pub fn open_v1() -> Result<Self, RadeError> {
+        Self::open(RadeVersion::V1)
+    }
+
+    /// Open the single RADE context, using the weights compiled into the
+    /// library. The version is fixed for the life of the context.
     ///
     /// Returns [`RadeError::AlreadyOpen`] if one is already live; drop that one
     /// first.
-    pub fn open_v1() -> Result<Self, RadeError> {
+    pub fn open(version: RadeVersion) -> Result<Self, RadeError> {
         if OPEN.swap(true, Ordering::AcqRel) {
             return Err(RadeError::AlreadyOpen);
         }
@@ -135,7 +142,12 @@ impl Rade {
         // `c_char` is signed on x86 and unsigned on ARM, so it is spelled out
         // rather than written as `0i8`.
         let mut model = [0 as std::os::raw::c_char; 1];
-        let r = unsafe { sys::rade_open(model.as_mut_ptr(), sys::RADE_VERBOSE_0 as i32) };
+        let mode = match version {
+            RadeVersion::V1 => 0,
+            RadeVersion::V2 => sys::RADE_MODE_V2,
+        };
+        let flags = (sys::RADE_VERBOSE_0 | mode) as i32;
+        let r = unsafe { sys::rade_open(model.as_mut_ptr(), flags) };
         if r.is_null() {
             OPEN.store(false, Ordering::Release);
             return Err(RadeError::OpenFailed);
@@ -176,7 +188,8 @@ impl Rade {
         self.nin_max
     }
 
-    /// Soft-decision bits carried by an End-of-Over frame.
+    /// Soft-decision bits carried by an End-of-Over frame. Zero for V2, which
+    /// carries its text in [data symbols](Rade::set_tx_data_symbol) instead.
     pub fn n_eoo_bits(&self) -> usize {
         self.n_eoo_bits
     }
@@ -226,7 +239,7 @@ impl Rade {
                 self.r,
                 features.as_mut_ptr(),
                 &mut has_eoo,
-                eoo.as_mut_ptr(),
+                if eoo.is_empty() { std::ptr::null_mut() } else { eoo.as_mut_ptr() },
                 rx_in.as_ptr() as *mut sys::RADE_COMP,
             )
         };
@@ -240,6 +253,20 @@ impl Rade {
             eoo.clear();
         }
         Ok(RxOut { n_features: n as usize, has_eoo: has_eoo != 0 })
+    }
+
+    /// V2: the data symbol (+1.0 / -1.0) the next [`Rade::tx`] frame carries.
+    /// Does nothing on V1.
+    pub fn set_tx_data_symbol(&mut self, symbol: f32) {
+        // Safety: `self.r` is valid for the lifetime of `self`.
+        unsafe { sys::rade_tx_set_data_symbol(self.r, symbol) };
+    }
+
+    /// V2: the soft-decision data symbol of the frame the last [`Rade::rx`]
+    /// returned features for. Meaningless on V1.
+    pub fn rx_data_symbol(&mut self) -> f32 {
+        // Safety: as above.
+        unsafe { sys::rade_rx_get_data_symbol(self.r) }
     }
 
     /// Set the soft-decision bits the next [`Rade::tx_eoo`] will carry.
@@ -309,6 +336,13 @@ impl Rade {
         unsafe { sys::rade_freq_offset(self.r) }
     }
 
+    /// V2's tuning indicator: while a signal is too far off to sync, +1 if
+    /// its audio is too high and -1 if too low; otherwise, and on V1, 0.
+    pub fn mistune(&self) -> i8 {
+        // Safety: `self.r` is valid for the lifetime of `self`.
+        unsafe { sys::rade_mistune(self.r) }.clamp(-1, 1) as i8
+    }
+
     /// SNR estimate in a 3 kHz noise bandwidth, valid while [`Rade::sync`].
     pub fn snr_3k_db(&self) -> f32 {
         // Safety: as above.
@@ -321,7 +355,7 @@ impl Drop for Rade {
         // Safety: `self.r` came from `rade_open` and is closed exactly once.
         unsafe { sys::rade_close(self.r) };
         // `rade_finalize()` is deliberately not called: it is process-global
-        // teardown, and a later `open_v1()` would have no way to undo it.
+        // teardown, and a later `open()` would have no way to undo it.
         OPEN.store(false, Ordering::Release);
     }
 }

@@ -122,7 +122,7 @@ or connects to a remote sdroxide server.
   map; click to tune and pre-fill a log entry.
 - **FreeDV Reporter** — report your station to
   [qso.freedv.org](https://qso.freedv.org/) and see who else is on FreeDV,
-  including callsign exchange in the RADE End-of-Over frame.
+  including RADE callsign exchange.
 - **Callsign lookup and QSL upload** — QRZ/HamQTH name/QTH/grid auto-fill, and
   one-click (or automatic) upload to eQSL, QRZ Logbook, HamQTH, Club Log and
   World Radio League,
@@ -16953,11 +16953,32 @@ hidden only when none of them is. The settings on the FreeDV tab are likewise
 the station's, so applying them from any radio's window changes the one session
 rather than opening a second under the same callsign.
 
-**Callsign exchange.** RADE carries a callsign in the frame at the end of each
+**Callsign exchange.** RADE V1 carries a callsign in the frame at the end of each
 over. SDRoxide transmits the callsign from your digital-mode configuration there,
 so other FreeDV stations can identify you, and decodes the far end's, showing it
 as the DX call and reporting it. This uses the same over-the-air format as
 FreeDV GUI, so the two interoperate.
+
+**RADE V2 (experimental).** The **V1** and **V2** chips at the top of the RADE
+panel choose the waveform for both receive and transmit. V1 is the default; the
+choice is saved with the digital-mode configuration, and it cannot be changed
+while transmitting. The two are not compatible, and there is no automatic
+detection: you only hear stations on the version you have selected.
+
+FreeDV is still developing V2, advises against using it on the air for now, and
+may change it in ways that are not backwards compatible, so this build works
+only with others made from a matching revision. In practice:
+
+- **Tune closely.** V2 syncs only within about 31 Hz. When it detects a signal
+  further off, the panel shows **SIGNAL TOO HIGH** or **SIGNAL TOO LOW** (of its
+  audio pitch: on upper sideband tune up when it is too high, on lower sideband
+  tune down).
+- **The callsign** is streamed alongside the speech and repeats every few
+  seconds, so it appears while the station is still talking. It needs at least
+  about 4.5 s of good signal. Only A–Z, 0–9 and `/` are sent, up to 32
+  characters.
+- **FreeDV Reporter** is the same server as for V1. Each report names the
+  version, so the site lists you as `RADEV2`.
 
 **Checking it works without going on air:** `sdroxide --freedv-reporter-probe 20`
 connects read-only for twenty seconds and prints the stations and events it saw.
@@ -18963,7 +18984,7 @@ using. Bind them under **Speech** on the Controls tab:
 | SSTV-FM | The same picture on an FM carrier, the way slow-scan is sent on VHF and UHF. |
 | RIFP | Radio Image Framing Protocol (draft-dulaunoy-rifp-00): packetised images over continuous-phase FSK. Centred on the dial, ~25 kHz wide — 70 cm, 2 m/6 m all-modes, or 10 m FM. |
 | RFPAINT | RF Paint — transmit-only spectrum painting of text and images onto the waterfall. |
-| RADE | FreeDV RADE V1 — digital voice: a neural codec (Radio Autoencoder) over an OFDM waveform about 900 Hz wide, decoded speech in place of what the receiver hears. On a sideband, and which one follows the band the way phone does — LSB on 160, 80 and 40 m, USB on 60 m, 30 m and above. |
+| RADE | FreeDV RADE — digital voice, V1 or the experimental V2 (switched on the RADE panel, see [10.5](#105-freedv-reporter-qsofreedvorg)): a neural codec (Radio Autoencoder) over an OFDM waveform about 900 Hz wide, decoded speech in place of what the receiver hears. On a sideband, and which one follows the band the way phone does — LSB on 160, 80 and 40 m, USB on 60 m, 30 m and above. |
 | PACKET / PACKET-HF | AX.25 packet radio: 1200 baud Bell 202 or 9600 baud G3RUH on VHF/UHF FM, 300 baud AFSK on HF sideband. Carries Winlink sessions and offers the modem as a KISS TNC. See [11](#11-winlink-radio-email). |
 | MERCURY | **Experimental.** Rhizomatica's HF ARQ data modem (codec2 OFDM with an MFSK floor), 500 or 2300 Hz wide. Carries Winlink sessions and keyboard chat, and serves Pat, BPQ or VarAC on a TCP host port. See [3.27](#327-mercury-and-data2g). |
 | DATA2G | **Experimental.** An OFDM HF ARQ data modem with LDPC/polar codes and a learned speed shifter, 500, 1200 or 2300 Hz wide; beta, protocol 15. Driven like MERCURY. See [3.27](#327-mercury-and-data2g). |

@@ -21,8 +21,10 @@ use num_complex::Complex32;
 use sdroxide_dsp::MonoResampler;
 use tracing::{info, warn};
 
+use crate::text_v2::TextV2;
 use crate::{
-    MODEM_RATE, RX_REAL_SCALE, Rade, RadeError, SPEECH_RATE, TX_REAL_SCALE, VocoderDec, VocoderEnc,
+    MODEM_RATE, RX_REAL_SCALE, Rade, RadeError, RadeVersion, SPEECH_RATE, TX_REAL_SCALE,
+    VocoderDec, VocoderEnc,
 };
 
 /// Ring capacity, in samples at the ring's own rate — one second, so a stall
@@ -36,8 +38,8 @@ const LEVEL_DECAY: f32 = 0.85;
 
 enum Ctl {
     SetTx(bool),
-    /// The callsign to transmit in the End-of-Over frame. Re-encoded on change
-    /// so keying up costs nothing.
+    /// The callsign to transmit: in V1's End-of-Over frame, or V2's data
+    /// symbols. Re-encoded on change so keying up costs nothing.
     SetCallsign(String),
     /// Drop receive state — used when re-entering the mode or after a big
     /// discontinuity.
@@ -45,7 +47,8 @@ enum Ctl {
     Stop,
 }
 
-/// A remote station's callsign, recovered from its End-of-Over frame.
+/// A remote station's callsign: recovered from its End-of-Over frame on V1, or
+/// from its data symbols on V2, where it arrives again every few seconds.
 ///
 /// This is the only station identification RADE carries, and it is what a
 /// FreeDV Reporter reception report is built from.
@@ -62,6 +65,7 @@ struct Shared {
     snr_mdb: AtomicI32,
     foff_mhz: AtomicI32,
     level_q16: AtomicI32,
+    mistune: AtomicI32,
     eoo_count: AtomicU64,
     dropped: AtomicU64,
     /// Set once the end-of-over frame has been generated and the TX chain has
@@ -84,6 +88,8 @@ pub struct RadeStats {
     pub eoo_count: u64,
     /// Samples dropped at a ring boundary since start.
     pub dropped: u64,
+    /// See [`Rade::mistune`].
+    pub mistune: i8,
 }
 
 /// Handle to the RADE worker thread.
@@ -103,15 +109,24 @@ pub struct RadeWorker {
 }
 
 impl RadeWorker {
+    /// [`RadeWorker::with_version`] for V1.
+    pub fn new(rx_rate: f64, audio_rate: f64) -> Result<Self, RadeError> {
+        Self::with_version(RadeVersion::V1, rx_rate, audio_rate)
+    }
+
     /// Spawn the worker.
     ///
     /// `rx_rate` is the rate of the audio pushed to [`RadeWorker::push_rx`]
     /// (the engine's demod tap); `audio_rate` is the rate of the decoded speech
     /// and of the microphone audio, i.e. the app's audio rate.
-    pub fn new(rx_rate: f64, audio_rate: f64) -> Result<Self, RadeError> {
+    pub fn with_version(
+        version: RadeVersion,
+        rx_rate: f64,
+        audio_rate: f64,
+    ) -> Result<Self, RadeError> {
         // Construct the C state on this thread so a failure is reported to the
         // caller instead of killing the worker at startup.
-        let rade = Rade::open_v1()?;
+        let rade = Rade::open(version)?;
         let enc = VocoderEnc::new()?;
         let dec = VocoderDec::new()?;
 
@@ -127,7 +142,10 @@ impl RadeWorker {
         // default: even with no callsign the frame carries the known sequence
         // the far end measures its noise floor from.
         let mut eoo_tx = vec![0.0f32; rade.n_eoo_bits()];
-        crate::text::encode("", &mut eoo_tx);
+        if version == RadeVersion::V1 {
+            crate::text::encode("", &mut eoo_tx);
+        }
+        let text_v2 = (version == RadeVersion::V2).then(TextV2::new);
 
         let inner = Inner {
             rade,
@@ -152,6 +170,9 @@ impl RadeWorker {
             iq: Vec::new(),
             eoo_tx,
             eoo_rx: Vec::new(),
+            text_v2,
+            call: String::new(),
+            heard_v2: Vec::new(),
             last_sync_snr: 0.0,
             text_tx,
             transmitting: false,
@@ -164,11 +185,11 @@ impl RadeWorker {
             .spawn(move || inner.run(ctl_rx))
             .expect("spawn sdroxide-rade thread");
 
-        info!(rx_rate, audio_rate, "RADE worker started");
+        info!(?version, rx_rate, audio_rate, "RADE worker started");
         Ok(RadeWorker { rx_in, rx_out, tx_in, tx_out, ctl, text_rx, shared, thread: Some(thread) })
     }
 
-    /// Set the callsign transmitted in the End-of-Over frame. Empty clears it.
+    /// Set the callsign we transmit. Empty clears it.
     ///
     /// This is how other FreeDV stations — and, through them, FreeDV Reporter —
     /// learn who we are.
@@ -276,6 +297,7 @@ impl RadeWorker {
             rx_level: s.level_q16.load(Ordering::Relaxed) as f32 / 65536.0,
             eoo_count: s.eoo_count.load(Ordering::Relaxed),
             dropped: s.dropped.load(Ordering::Relaxed),
+            mistune: s.mistune.load(Ordering::Relaxed) as i8,
         }
     }
 }
@@ -329,7 +351,7 @@ struct Inner {
     iq: Vec<Complex32>,
 
     /// Our callsign, pre-encoded as End-of-Over soft bits so keying down costs
-    /// nothing. Always `rade.n_eoo_bits()` long.
+    /// nothing. Always `rade.n_eoo_bits()` long, so empty on V2.
     eoo_tx: Vec<f32>,
     /// Scratch for the End-of-Over bits `rade_rx` hands back.
     eoo_rx: Vec<f32>,
@@ -338,6 +360,11 @@ struct Inner {
     /// so the report needs the latched value rather than a later read.
     last_sync_snr: f32,
     text_tx: Sender<RadeTextRx>,
+    /// The V2 text channel; `None` on V1.
+    text_v2: Option<TextV2>,
+    /// Our callsign, to restart V2's text cycle at the start of each over.
+    call: String,
+    heard_v2: Vec<String>,
 
     transmitting: bool,
     was_sync: bool,
@@ -350,7 +377,7 @@ impl Inner {
             match ctl.recv_timeout(POLL) {
                 Ok(Ctl::Stop) | Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 Ok(Ctl::SetTx(on)) => self.set_tx(on),
-                Ok(Ctl::SetCallsign(c)) => crate::text::encode(&c, &mut self.eoo_tx),
+                Ok(Ctl::SetCallsign(c)) => self.set_call(c),
                 Ok(Ctl::Reset) => self.reset_rx(),
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
             }
@@ -361,6 +388,14 @@ impl Inner {
             }
         }
         info!("RADE worker stopped");
+    }
+
+    fn set_call(&mut self, call: String) {
+        match self.text_v2.as_mut() {
+            Some(t) => t.set_message(&call),
+            None => crate::text::encode(&call, &mut self.eoo_tx),
+        }
+        self.call = call;
     }
 
     fn set_tx(&mut self, on: bool) {
@@ -374,6 +409,11 @@ impl Inner {
             while self.rx_in.pop().is_ok() {}
             self.buf8.clear();
             self.reset_rx();
+            // Start the callsign from its first bit, so a short over still
+            // carries all of it.
+            if let Some(t) = self.text_v2.as_mut() {
+                t.set_message(&self.call);
+            }
         } else {
             // Leaving transmit: flush whatever mic audio is left, then emit the
             // End-of-Over frame the far end uses to close the over.
@@ -385,7 +425,7 @@ impl Inner {
                 self.tx_features.resize(n, 0.0);
                 let block = std::mem::take(&mut self.tx_features);
                 self.iq.clear();
-                match self.rade.tx(&block, &mut self.iq) {
+                match self.modulate(&block) {
                     Ok(()) => self.emit_tx_iq(),
                     Err(e) => warn!(?e, "rade_tx failed flushing the over"),
                 }
@@ -394,7 +434,9 @@ impl Inner {
             // Load our callsign into the frame about to go out. Done here
             // rather than when the callsign changes, so the value is current
             // even if the operator edited it mid-over.
-            if let Err(e) = self.rade.set_tx_eoo_bits(&self.eoo_tx) {
+            if self.text_v2.is_none()
+                && let Err(e) = self.rade.set_tx_eoo_bits(&self.eoo_tx)
+            {
                 warn!(?e, "rade_tx_set_eoo_bits failed");
             }
             if let Err(e) = self.rade.tx_eoo(&mut self.iq) {
@@ -410,7 +452,11 @@ impl Inner {
 
     fn reset_rx(&mut self) {
         self.dec.reset();
+        if let Some(t) = self.text_v2.as_mut() {
+            t.reset_rx();
+        }
         self.shared.sync.store(false, Ordering::Relaxed);
+        self.shared.mistune.store(0, Ordering::Relaxed);
         self.level = 0.0;
     }
 
@@ -447,11 +493,16 @@ impl Inner {
             // Before the End-of-Over handling, so a frame that arrived while
             // still in sync refreshes the SNR the report will carry.
             self.publish_rx_state();
+            if out.n_features > 0 {
+                self.receive_text_v2();
+            }
             if out.has_eoo {
                 self.shared.eoo_count.fetch_add(1, Ordering::Relaxed);
                 // Tens of microseconds of belief propagation, once per over,
                 // on this thread — never the audio callback.
-                if let Some(call) = crate::text::decode(&self.eoo_rx) {
+                if self.text_v2.is_none()
+                    && let Some(call) = crate::text::decode(&self.eoo_rx)
+                {
                     info!(%call, snr_db = self.last_sync_snr, "RADE End-of-Over callsign");
                     let _ = self.text_tx.send(RadeTextRx { call, snr_db: self.last_sync_snr });
                 }
@@ -460,6 +511,17 @@ impl Inner {
                 continue;
             }
             self.synthesize();
+        }
+    }
+
+    /// Feed the data symbol of the frame just demodulated to V2's decoder.
+    fn receive_text_v2(&mut self) {
+        let Some(t) = self.text_v2.as_mut() else { return };
+        t.receive(self.rade.rx_data_symbol(), &mut self.heard_v2);
+        // A station with no callsign set sends an empty message.
+        for call in self.heard_v2.drain(..).filter(|c| !c.is_empty()) {
+            info!(%call, snr_db = self.last_sync_snr, "RADE V2 callsign");
+            let _ = self.text_tx.send(RadeTextRx { call, snr_db: self.last_sync_snr });
         }
     }
 
@@ -505,9 +567,13 @@ impl Inner {
             // Losing sync ends the over: start the vocoder's warm-up again so
             // the next one doesn't continue from stale state.
             self.dec.reset();
+            if let Some(t) = self.text_v2.as_mut() {
+                t.reset_rx();
+            }
         }
         self.was_sync = sync;
         self.shared.sync.store(sync, Ordering::Relaxed);
+        self.shared.mistune.store(self.rade.mistune().into(), Ordering::Relaxed);
         if sync {
             let snr = self.rade.snr_3k_db();
             // Latched for the End-of-Over report: by the time an over's
@@ -548,12 +614,20 @@ impl Inner {
         while self.tx_features.len() >= n {
             self.iq.clear();
             let block: Vec<f32> = self.tx_features.drain(..n).collect();
-            if let Err(e) = self.rade.tx(&block, &mut self.iq) {
+            if let Err(e) = self.modulate(&block) {
                 warn!(?e, "rade_tx failed");
                 continue;
             }
             self.emit_tx_iq();
         }
+    }
+
+    /// One feature block into a modem frame, in `self.iq`.
+    fn modulate(&mut self, features: &[f32]) -> Result<(), RadeError> {
+        if let Some(t) = self.text_v2.as_mut() {
+            self.rade.set_tx_data_symbol(t.next_symbol());
+        }
+        self.rade.tx(features, &mut self.iq)
     }
 
     /// Take the real part of the modulated IQ, scale it to full-scale audio and
