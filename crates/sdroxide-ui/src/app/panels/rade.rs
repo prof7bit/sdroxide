@@ -167,14 +167,14 @@ impl SdroxideApp {
         });
         ui.add_space(8.0);
 
-        // Decoded-speech level.
+        // Speech level: decoded on receive, into the vocoder on transmit.
         {
             let (bar, _) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 6.0), egui::Sense::hover());
             let p = ui.painter_at(bar);
             p.rect_filled(bar, 0.0, crate::theme::gray(22));
             let level = rade.rx_level.clamp(0.0, 1.0);
-            if level > 0.0 && !transmitting {
+            if level > 0.0 {
                 let mut fill = bar;
                 fill.set_width(bar.width() * level);
                 p.rect_filled(fill, 0.0, crate::theme::CYAN());

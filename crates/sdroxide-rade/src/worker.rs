@@ -35,6 +35,9 @@ const RING_SECS: f64 = 1.0;
 const POLL: Duration = Duration::from_millis(5);
 /// Speech level decays this fast per output block, so the UI meter falls back.
 const LEVEL_DECAY: f32 = 0.85;
+/// The same fall-back on transmit, per 10 ms vocoder frame: [`LEVEL_DECAY`]
+/// once per 120 ms.
+const TX_LEVEL_DECAY: f32 = 0.987;
 
 enum Ctl {
     SetTx(bool),
@@ -82,7 +85,8 @@ pub struct RadeStats {
     pub snr_db: f32,
     /// Frequency offset of the received signal (valid while `sync`).
     pub freq_offset_hz: f32,
-    /// Peak level of decoded speech, 0..1.
+    /// Peak level of decoded speech, or on transmit of the speech going into
+    /// the vocoder, 0..1.
     pub rx_level: f32,
     /// Count of End-of-Over frames seen; a change means the far end unkeyed.
     pub eoo_count: u64,
@@ -446,6 +450,7 @@ impl Inner {
             self.buf16.clear();
             self.tx_features.clear();
             while self.tx_in.pop().is_ok() {}
+            self.set_level(0.0);
             self.shared.tx_finished.store(true, Ordering::Release);
         }
     }
@@ -457,7 +462,7 @@ impl Inner {
         }
         self.shared.sync.store(false, Ordering::Relaxed);
         self.shared.mistune.store(0, Ordering::Relaxed);
-        self.level = 0.0;
+        self.set_level(0.0);
     }
 
     fn service_rx(&mut self) {
@@ -541,10 +546,7 @@ impl Inner {
         self.scratch.extend(self.pcm.iter().map(|&s| s as f32 / 32768.0));
 
         let peak = self.scratch.iter().fold(0.0f32, |a, s| a.max(s.abs()));
-        self.level = (self.level * LEVEL_DECAY).max(peak);
-        self.shared
-            .level_q16
-            .store((self.level.clamp(0.0, 1.0) * 65536.0) as i32, Ordering::Relaxed);
+        self.set_level((self.level * LEVEL_DECAY).max(peak));
 
         self.audio.clear();
         match self.rx_up.as_mut() {
@@ -559,6 +561,11 @@ impl Inner {
                 }
             }
         }
+    }
+
+    fn set_level(&mut self, level: f32) {
+        self.level = level;
+        self.shared.level_q16.store((level.clamp(0.0, 1.0) * 65536.0) as i32, Ordering::Relaxed);
     }
 
     fn publish_rx_state(&mut self) {
@@ -601,6 +608,8 @@ impl Inner {
         // 16 kHz speech -> feature vectors.
         let frame = self.enc.frame_size();
         while self.buf16.len() >= frame {
+            let peak = self.buf16[..frame].iter().fold(0.0f32, |a, s| a.max(s.abs()));
+            self.set_level((self.level * TX_LEVEL_DECAY).max(peak));
             self.pcm.clear();
             self.pcm.extend(self.buf16[..frame].iter().copied().map(crate::f32_to_i16));
             self.buf16.drain(..frame);

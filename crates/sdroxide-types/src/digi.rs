@@ -658,7 +658,8 @@ pub struct RadeStatus {
     pub snr_db: f32,
     /// Frequency offset of the received signal (meaningful while `sync`).
     pub freq_offset_hz: f32,
-    /// Peak level of the decoded speech, 0..1 — drives the RX meter.
+    /// Peak level of the decoded speech, or on transmit of the speech going
+    /// into the vocoder, 0..1 — drives the panel's meter.
     pub rx_level: f32,
     /// End-of-over frames seen this session; a change means the far end
     /// finished an over.
