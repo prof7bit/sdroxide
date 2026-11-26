@@ -130,8 +130,8 @@ pub enum RadioEvent {
     /// Latest set of network spots (DX cluster / POTA / SOTA / PSK Reporter),
     /// merged and de-duplicated by the spot manager.
     Spots(Vec<Spot>),
-    /// Everybody else on FreeDV Reporter, on any frequency: the whole list
-    /// each time it changes.
+    /// Everybody else on FreeDV Reporter who is on our RADE version, on any
+    /// frequency: the whole list each time it changes.
     FreeDvStations(Vec<crate::FreeDvStation>),
     /// A human-readable status line for the spot feeds (cluster connection
     /// state, feed errors). `None` clears it.

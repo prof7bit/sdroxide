@@ -16981,8 +16981,9 @@ only with others made from a matching revision. In practice:
   version, so the site lists you as `RADEV2`.
 
 **Who is on your frequency.** With the feature on, the RADE panel lists the other
-reporter stations within 1 kHz of your transmit frequency, whatever software or
-mode they report. **TX/RX** shows whether each one is transmitting. A station
+reporter stations within 1 kHz of your transmit frequency that report the RADE
+version you have selected (**V1** lists `RADEV1`, **V2** lists `RADEV2`),
+whatever software they run. **TX/RX** shows whether each one is transmitting. A station
 that reports receiving a signal also shows that **SNR**; whose signal it is is
 not shown. Rows are tinted red while a station transmits and green while it is
 receiving. As in FreeDV GUI, the SNR stays for 20 s after the last report naming

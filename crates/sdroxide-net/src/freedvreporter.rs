@@ -320,13 +320,14 @@ impl Roster {
         s.receiving = Some((snr.round() as i16, now + hold));
     }
 
-    /// Everybody but ourselves who is on a known frequency, in a stable order.
-    fn stations(&self, now: Instant, my_sid: Option<&str>) -> Vec<FreeDvStation> {
+    /// Everybody but ourselves who reports `mode` and is on a known frequency,
+    /// in a stable order.
+    fn stations(&self, now: Instant, my_sid: Option<&str>, mode: &str) -> Vec<FreeDvStation> {
         let mut v: Vec<FreeDvStation> = self
             .by_sid
             .iter()
             .filter(|(sid, _)| Some(sid.as_str()) != my_sid)
-            .filter(|(_, s)| !s.call.is_empty() && s.freq_hz > 0)
+            .filter(|(_, s)| !s.call.is_empty() && s.freq_hz > 0 && s.mode == mode)
             .map(|(_, s)| FreeDvStation {
                 call: s.call.clone(),
                 freq_hz: s.freq_hz,
@@ -973,7 +974,9 @@ impl Reporter {
     /// spots it does not depend on `show_spots`.
     fn publish_stations(&mut self) {
         self.stations_checked = Instant::now();
-        let now = self.roster.stations(Instant::now(), self.my_sid.as_deref());
+        // Only those on our RADE version: the other cannot be worked.
+        let mode = self.version.reporter_mode();
+        let now = self.roster.stations(Instant::now(), self.my_sid.as_deref(), mode);
         if now != self.stations {
             self.stations = now.clone();
             let _ = self.events.send(NetEvent::FreeDvStations(now));
@@ -1377,8 +1380,13 @@ mod tests {
         for (sid, call) in [("a", "DL1AAA"), ("b", "dl2bbb"), ("me", "DD4UG")] {
             r.on_event("new_connection", &json!({ "sid": sid, "callsign": call }));
             r.on_event("freq_change", &json!({ "sid": sid, "freq": 7_177_000u64 }));
+            r.on_event(
+                "tx_report",
+                &json!({ "sid": sid, "transmitting": false, "mode": "RADEV2" }),
+            );
         }
-        let list = |r: &Roster, after: Duration| r.stations(Instant::now() + after, Some("me"));
+        let list =
+            |r: &Roster, after: Duration| r.stations(Instant::now() + after, Some("me"), "RADEV2");
         let snr = |r: &Roster, after: u64| list(r, Duration::from_secs(after))[0].rx_snr_db;
         // `sid` is who receives; `callsign` is who they hear, if known.
         let hears = |r: &mut Roster, call: &str, mode: &str, snr: f64| {
@@ -1413,6 +1421,11 @@ mod tests {
 
         r.on_event("remove_connection", &json!({ "sid": "a" }));
         assert_eq!(list(&r, Duration::ZERO).len(), 1);
+
+        // A station moving to the other version moves to the other list.
+        r.on_event("tx_report", &json!({ "sid": "b", "transmitting": false, "mode": "RADEV1" }));
+        assert!(list(&r, Duration::ZERO).is_empty());
+        assert_eq!(r.stations(Instant::now(), Some("me"), "RADEV1").len(), 1);
     }
 
     #[test]

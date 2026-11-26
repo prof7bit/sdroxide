@@ -5580,7 +5580,7 @@ rade-offset-hz = Versatz { $freq_offset_hz } Hz
 rade-col-call = Rufzeichen
 rade-col-status = TX/RX
 rade-col-snr = SNR
-rade-no-stations = Keine andere FreeDV-Reporter-Station auf dieser Frequenz (±1 kHz).
+rade-no-stations = Keine andere FreeDV-Reporter-Station auf dieser Frequenz (±1 kHz) mit der gewählten RADE-Version.
 rade-heard = gehört { $call }
 rade-samples-dropped-between-receiver-decoder = ⚠ { $dropped } Abtastwerte zwischen Empfänger und Decoder verworfen — dieser Rechner kommt mit der neuronalen Dekodierung nicht mit.
 
