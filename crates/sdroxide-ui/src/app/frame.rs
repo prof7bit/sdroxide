@@ -2111,6 +2111,11 @@ impl SdroxideApp {
                     self.spots_gen += 1;
                     self.adopted_spots_gen = None;
                 }
+                RadioEvent::FreeDvStations(s) => {
+                    self.freedv_stations = s;
+                    self.spots_gen += 1;
+                    self.adopted_spots_gen = None;
+                }
                 RadioEvent::TciSpots(s) => self.tci_spots = s,
                 RadioEvent::NetStatus(s) => {
                     self.net_status = s;

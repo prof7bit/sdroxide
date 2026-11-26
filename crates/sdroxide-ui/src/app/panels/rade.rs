@@ -10,6 +10,14 @@ use sdroxide_types::{Command, RadeVersion};
 
 use crate::app::{SdroxideApp, tx_gated};
 
+/// How far from our own frequency a station may be and still be listed.
+const NEARBY_HZ: u64 = 1_000;
+/// Column positions of the station list, from its left edge: narrow enough for
+/// a phone.
+const STATUS_X: f32 = 110.0;
+const SNR_RIGHT_X: f32 = 220.0;
+const ROW_H: f32 = 18.0;
+
 impl SdroxideApp {
     pub(in crate::app) fn rade_panel(
         &mut self,
@@ -204,25 +212,88 @@ impl SdroxideApp {
         });
         ui.add_space(12.0);
 
-        ui.label(
-            RichText::new(if v2 {
-                tr!("rade-v2-experimental-note")
-            } else {
-                tr!("rade-rade-v1-occupies-roughly-1060")
-            })
-            .size(10.5)
-            .color(crate::theme::gray(125)),
-        );
-        if rade.dropped > 0 {
-            ui.add_space(6.0);
+        // The station list and the notes below it share what height is left.
+        egui::ScrollArea::vertical().id_salt("rade-stations").auto_shrink(false).show(ui, |ui| {
+            self.rade_station_list(ui);
+            ui.add_space(12.0);
             ui.label(
-                RichText::new(tr!(
-                    "rade-samples-dropped-between-receiver-decoder",
-                    dropped = rade.dropped
-                ))
+                RichText::new(if v2 {
+                    tr!("rade-v2-experimental-note")
+                } else {
+                    tr!("rade-rade-v1-occupies-roughly-1060")
+                })
                 .size(10.5)
-                .color(crate::theme::YELLOW()),
+                .color(crate::theme::gray(125)),
             );
+            if rade.dropped > 0 {
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(tr!(
+                        "rade-samples-dropped-between-receiver-decoder",
+                        dropped = rade.dropped
+                    ))
+                    .size(10.5)
+                    .color(crate::theme::YELLOW()),
+                );
+            }
+        });
+    }
+
+    /// Who else FreeDV Reporter has on this frequency. A row is tinted while
+    /// that station transmits, or while it reports receiving something.
+    fn rade_station_list(&self, ui: &mut egui::Ui) {
+        let ours = self.state.tx_freq_hz().round().max(0.0) as u64;
+        let mut rows = self
+            .freedv_stations
+            .iter()
+            .filter(|s| s.freq_hz.abs_diff(ours) <= NEARBY_HZ)
+            .peekable();
+        if rows.peek().is_none() {
+            ui.label(
+                RichText::new(tr!("rade-no-stations")).size(11.0).color(crate::theme::gray(125)),
+            );
+            return;
+        }
+        let row = |ui: &mut egui::Ui,
+                   tint: Option<egui::Color32>,
+                   cells: [(&str, egui::Color32); 3]| {
+            let (r, _) = ui
+                .allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), egui::Sense::hover());
+            let p = ui.painter_at(r);
+            if let Some(tint) = tint {
+                p.rect_filled(r, 0.0, tint);
+            }
+            let font = egui::FontId::monospace(12.0);
+            let places = [
+                (4.0, egui::Align2::LEFT_CENTER),
+                (STATUS_X, egui::Align2::LEFT_CENTER),
+                (SNR_RIGHT_X, egui::Align2::RIGHT_CENTER),
+            ];
+            for ((text, color), (x, align)) in cells.into_iter().zip(places) {
+                p.text(egui::pos2(r.left() + x, r.center().y), align, text, font.clone(), color);
+            }
+        };
+        let dim = crate::theme::gray(125);
+        row(
+            ui,
+            None,
+            [
+                (&tr!("rade-col-call"), dim),
+                (&tr!("rade-col-status"), dim),
+                (&tr!("rade-col-snr"), dim),
+            ],
+        );
+        let text = crate::theme::TEXT_STRONG();
+        for s in rows {
+            // Transmitting wins, as on the reporter's own page.
+            let (tint, status, snr) = if s.tx {
+                (Some(crate::theme::ALERT().gamma_multiply(0.35)), "TX", None)
+            } else {
+                let tint = s.rx_snr_db.map(|_| crate::theme::GREEN().gamma_multiply(0.30));
+                (tint, "RX", s.rx_snr_db)
+            };
+            let snr = snr.map(|db| format!("{db} dB")).unwrap_or_default();
+            row(ui, tint, [(&s.call, text), (status, text), (&snr, text)]);
         }
     }
 }

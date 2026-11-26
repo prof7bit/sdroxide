@@ -1789,7 +1789,8 @@ use sdroxide_types::{
 /// `DigiStatus`, and `RadeStatus` gains `mistune` on its tail, so a v225 peer
 /// fails to decode either. Not the next number up, which upstream will use for
 /// something else: it is 60000 plus the upstream version underneath, and has to
-/// follow that version whenever upstream is merged.
+/// follow that version whenever upstream is merged. `ServerMsg` also gains a
+/// trailing `FreeDvStations`.
 pub const PROTO_VERSION: u16 = 60_225;
 const VERSION_BYTE: u8 = 0x12;
 
@@ -2319,6 +2320,11 @@ pub enum ServerMsg {
     ///
     /// Appended last, for the usual reason.
     TciSpots(Vec<Spot>),
+
+    /// `RadioEvent::FreeDvStations`: the FreeDV Reporter station list, whole,
+    /// kept by the station and replayed to a client that attaches late.
+    /// Appended last, for the usual reason.
+    FreeDvStations(Vec<sdroxide_types::FreeDvStation>),
 }
 
 /// One radio in a station's roster, as a client sees it.

@@ -5720,6 +5720,10 @@ pi4-utc-ago = { $t }:{ $t2 } UTC — { $slot_utc } ago
 
 rade-snr-db = SNR { $snr_db } dB
 rade-offset-hz = offset { $freq_offset_hz } Hz
+rade-col-call = Callsign
+rade-col-status = TX/RX
+rade-col-snr = SNR
+rade-no-stations = No other FreeDV Reporter station on this frequency (±1 kHz).
 rade-heard = heard { $call }
 rade-samples-dropped-between-receiver-decoder = ⚠ { $dropped } samples dropped between the receiver and the decoder — this machine is not keeping up with the neural decode.
 

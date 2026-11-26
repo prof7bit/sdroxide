@@ -200,6 +200,7 @@ async fn run_session(
         rds,
         ism_reports,
         tci_spots,
+        freedv_stations,
         ism_status,
         adsb_status,
         vdl2_status,
@@ -229,6 +230,7 @@ async fn run_session(
             latest.rds.clone(),
             latest.ism_reports.clone(),
             latest.tci_spots.clone(),
+            latest.freedv_stations.clone(),
             latest.ism_status.clone(),
             latest.adsb_status.clone(),
             latest.vdl2_status.clone(),
@@ -295,6 +297,10 @@ async fn run_session(
     // The labels TCI clients placed, for the same reason.
     if !tci_spots.is_empty() {
         let _ = socket.send(msg(&ServerMsg::TciSpots(tci_spots))).await;
+    }
+    // And the FreeDV Reporter station list.
+    if !freedv_stations.is_empty() {
+        let _ = socket.send(msg(&ServerMsg::FreeDvStations(freedv_stations))).await;
     }
     // The aircraft table, for the same reason: what is overhead is a condition.
     if let Some(st) = adsb_status {

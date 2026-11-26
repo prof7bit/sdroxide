@@ -16980,6 +16980,15 @@ only with others made from a matching revision. In practice:
 - **FreeDV Reporter** is the same server as for V1. Each report names the
   version, so the site lists you as `RADEV2`.
 
+**Who is on your frequency.** With the feature on, the RADE panel lists the other
+reporter stations within 1 kHz of your transmit frequency, whatever software or
+mode they report. **TX/RX** shows whether each one is transmitting. A station
+that reports receiving a signal also shows that **SNR**; whose signal it is is
+not shown. Rows are tinted red while a station transmits and green while it is
+receiving. As in FreeDV GUI, the SNR stays for 20 s after the last report naming
+a callsign and 5 s after an unnamed one. The list does not depend on showing
+reporter stations as spots.
+
 **Checking it works without going on air:** `sdroxide --freedv-reporter-probe 20`
 connects read-only for twenty seconds and prints the stations and events it saw.
 It uses the server's view role, so it needs no radio and never makes you visible

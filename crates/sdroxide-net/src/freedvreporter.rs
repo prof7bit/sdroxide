@@ -37,7 +37,7 @@ use serde_json::{Value, json};
 use tracing::{debug, info, warn};
 use tungstenite::{Message, WebSocket};
 
-use sdroxide_types::{FreeDvReporterConfig, RadeVersion, Spot, SpotKind};
+use sdroxide_types::{FreeDvReporterConfig, FreeDvStation, RadeVersion, Spot, SpotKind};
 
 use crate::event::{EventTx, FeedTx, NetEvent};
 use crate::socketio::{self, Frame};
@@ -74,6 +74,15 @@ const PUBLISH_MAX_INTERVAL: Duration = Duration::from_secs(60);
 /// silence we tolerate, not a fixed cadence: we never emit more than one
 /// keepalive per minute, and none at all while we have genuine traffic.
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(60);
+
+/// How long a station counts as receiving after its last `rx_report`: longer
+/// when it named who it hears, since those come further apart than the
+/// unidentified ones. The same two times FreeDV GUI uses.
+const RX_HOLD_NAMED: Duration = Duration::from_secs(20);
+const RX_HOLD_UNNAMED: Duration = Duration::from_secs(5);
+
+/// How often the station list is checked for changes, expiry included.
+const STATIONS_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Guard against a malicious or buggy server nesting `bulk_update`s.
 const MAX_BULK_DEPTH: u32 = 1;
@@ -193,6 +202,9 @@ struct Station {
     /// well. Folded in here rather than spotted separately, which would
     /// double-count the station on the overlay.
     heard_by: Option<(String, i16)>,
+    /// What this station itself is receiving: its SNR, and until when that
+    /// still counts.
+    receiving: Option<(i16, Instant)>,
 }
 
 /// The server's view of who is on the air, keyed by socket.io session id.
@@ -252,6 +264,7 @@ impl Roster {
                 true
             }
             "rx_report" => {
+                self.note_receiving(args, Instant::now());
                 // Unlike the others this is keyed by the *heard* callsign, not
                 // by sid: `sid` here is the receiving station.
                 let (Some(heard), Some(rx_call)) =
@@ -287,6 +300,46 @@ impl Roster {
             }
             _ => false,
         }
+    }
+
+    /// The other side of an `rx_report`: `sid` names the station that is
+    /// receiving. It does not touch the spots.
+    fn note_receiving(&mut self, args: &Value, now: Instant) {
+        let Some(s) = str_of(args, "sid").and_then(|sid| self.by_sid.get_mut(&sid)) else {
+            return;
+        };
+        let Some(call) = str_of(args, "callsign") else { return };
+        // Neither callsign nor mode: the server clearing the state, as it does
+        // when the station retunes.
+        if call.is_empty() && str_of(args, "mode").unwrap_or_default().is_empty() {
+            s.receiving = None;
+            return;
+        }
+        let Some(snr) = args.get("snr").and_then(Value::as_f64) else { return };
+        let hold = if call.is_empty() { RX_HOLD_UNNAMED } else { RX_HOLD_NAMED };
+        s.receiving = Some((snr.round() as i16, now + hold));
+    }
+
+    /// Everybody but ourselves who is on a known frequency, in a stable order.
+    fn stations(&self, now: Instant, my_sid: Option<&str>) -> Vec<FreeDvStation> {
+        let mut v: Vec<FreeDvStation> = self
+            .by_sid
+            .iter()
+            .filter(|(sid, _)| Some(sid.as_str()) != my_sid)
+            .filter(|(_, s)| !s.call.is_empty() && s.freq_hz > 0)
+            .map(|(_, s)| FreeDvStation {
+                call: s.call.clone(),
+                freq_hz: s.freq_hz,
+                tx: s.tx,
+                rx_snr_db: s.receiving.filter(|&(_, until)| now < until).map(|(snr, _)| snr),
+            })
+            .collect();
+        // The whole tuple, so that one call signed in twice cannot swap places
+        // with the map's iteration order and look like a change.
+        v.sort_by(|a, b| {
+            (&a.call, a.freq_hz, a.tx, a.rx_snr_db).cmp(&(&b.call, b.freq_hz, b.tx, b.rx_snr_db))
+        });
+        v
     }
 
     /// Most events repeat the station's identity; take it when present so a
@@ -406,6 +459,9 @@ struct Reporter {
     roster: Roster,
     roster_dirty: bool,
     last_publish: Instant,
+    /// The station list as last sent, and when it was last looked at.
+    stations: Vec<FreeDvStation>,
+    stations_checked: Instant,
 
     // ── Diagnostics, surfaced by `probe`.
     got_open: bool,
@@ -448,6 +504,8 @@ impl Reporter {
             roster: Roster::default(),
             roster_dirty: false,
             last_publish: Instant::now(),
+            stations: Vec::new(),
+            stations_checked: Instant::now(),
             got_open: false,
             got_connect_ack: false,
             got_connection_successful: false,
@@ -562,6 +620,10 @@ impl Reporter {
             if (self.roster_dirty && since >= PUBLISH_MIN_INTERVAL) || since >= PUBLISH_MAX_INTERVAL
             {
                 self.publish_spots();
+            }
+
+            if self.stations_checked.elapsed() >= STATIONS_INTERVAL {
+                self.publish_stations();
             }
 
             // (f) Keep the server's record of us fresh through a quiet watch.
@@ -907,6 +969,17 @@ impl Reporter {
         let _ = self.feed.send((SpotKind::FreeDv, spots));
     }
 
+    /// Send the station list if it differs from the one last sent. Unlike the
+    /// spots it does not depend on `show_spots`.
+    fn publish_stations(&mut self) {
+        self.stations_checked = Instant::now();
+        let now = self.roster.stations(Instant::now(), self.my_sid.as_deref());
+        if now != self.stations {
+            self.stations = now.clone();
+            let _ = self.events.send(NetEvent::FreeDvStations(now));
+        }
+    }
+
     fn drop_connection(&mut self, why: &str) {
         if self.ws.take().is_some() {
             warn!("FreeDV Reporter disconnected: {why}");
@@ -915,6 +988,7 @@ impl Reporter {
         self.fully_connected = false;
         self.my_sid = None;
         self.roster = Roster::default();
+        self.publish_stations();
         // Pace the reconnect too: a server that accepts us and then hangs up
         // immediately must not be retried in a tight loop either.
         self.schedule_retry();
@@ -930,6 +1004,8 @@ impl Reporter {
             let _ = ws.flush();
         }
         let _ = self.feed.send((SpotKind::FreeDv, Vec::new()));
+        self.roster = Roster::default();
+        self.publish_stations();
         self.status(None);
     }
 
@@ -1293,6 +1369,50 @@ mod tests {
             software_version(),
             format!("SDRoxide {}+{BUILD_TAG}", env!("CARGO_PKG_VERSION"))
         );
+    }
+
+    #[test]
+    fn the_station_list_says_who_sends_and_who_receives() {
+        let mut r = Roster::default();
+        for (sid, call) in [("a", "DL1AAA"), ("b", "dl2bbb"), ("me", "DD4UG")] {
+            r.on_event("new_connection", &json!({ "sid": sid, "callsign": call }));
+            r.on_event("freq_change", &json!({ "sid": sid, "freq": 7_177_000u64 }));
+        }
+        let list = |r: &Roster, after: Duration| r.stations(Instant::now() + after, Some("me"));
+        let snr = |r: &Roster, after: u64| list(r, Duration::from_secs(after))[0].rx_snr_db;
+        // `sid` is who receives; `callsign` is who they hear, if known.
+        let hears = |r: &mut Roster, call: &str, mode: &str, snr: f64| {
+            r.on_event(
+                "rx_report",
+                &json!({ "sid": "a", "receiver_callsign": "DL1AAA", "callsign": call,
+                         "mode": mode, "snr": snr }),
+            );
+        };
+
+        let calls: Vec<_> = list(&r, Duration::ZERO).into_iter().map(|s| s.call).collect();
+        assert_eq!(calls, ["DL1AAA", "DL2BBB"], "sorted, and without ourselves");
+        assert_eq!(snr(&r, 0), None);
+
+        // Heard somebody unnamed: held briefly.
+        hears(&mut r, "", "RADEV2", 6.6);
+        assert_eq!(snr(&r, 4), Some(7));
+        assert_eq!(snr(&r, 6), None);
+
+        // Named: held longer.
+        hears(&mut r, "G0XYZ", "RADEV1", -2.0);
+        assert_eq!(snr(&r, 19), Some(-2));
+        assert_eq!(snr(&r, 21), None);
+        assert_eq!(list(&r, Duration::ZERO)[1].rx_snr_db, None, "only the receiver is marked");
+
+        // Neither callsign nor mode clears it at once.
+        hears(&mut r, "", "", 0.0);
+        assert_eq!(snr(&r, 0), None);
+
+        r.on_event("tx_report", &json!({ "sid": "b", "transmitting": true }));
+        assert!(list(&r, Duration::ZERO)[1].tx);
+
+        r.on_event("remove_connection", &json!({ "sid": "a" }));
+        assert_eq!(list(&r, Duration::ZERO).len(), 1);
     }
 
     #[test]

@@ -649,6 +649,18 @@ impl RadeVersion {
     }
 }
 
+/// One station on FreeDV Reporter, as far as the RADE panel's list needs it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FreeDvStation {
+    pub call: String,
+    /// The frequency it has told the reporter it is on.
+    pub freq_hz: u64,
+    pub tx: bool,
+    /// While the station is receiving a signal, the SNR it reports for it;
+    /// whose signal that is does not matter here.
+    pub rx_snr_db: Option<i16>,
+}
+
 /// Live state of the RADE modem.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct RadeStatus {

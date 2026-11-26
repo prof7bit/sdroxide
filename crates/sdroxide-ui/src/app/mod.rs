@@ -1037,7 +1037,10 @@ pub struct SdroxideApp {
     spots: Vec<Spot>,
     /// Latest feed/connection status line (cluster state, feed errors).
     net_status: Option<String>,
-    /// Bumped whenever `spots` or `net_status` changes, so the multi-radio
+    /// Everybody on FreeDV Reporter, for the RADE panel's list. Travels with
+    /// the other station feeds.
+    freedv_stations: Vec<sdroxide_types::FreeDvStation>,
+    /// Bumped whenever `spots`, `net_status` or `freedv_stations` changes, so the multi-radio
     /// shell can hand the station radio's feeds to the other tabs without
     /// comparing or cloning the list every frame.
     spots_gen: u64,
@@ -2001,6 +2004,7 @@ impl SdroxideApp {
             log_edit: None,
             spots: Vec::new(),
             net_status: None,
+            freedv_stations: Vec::new(),
             spots_gen: 0,
             adopted_spots_gen: None,
             show_spots: false,
@@ -2209,8 +2213,10 @@ impl SdroxideApp {
 
     /// Multi-radio: the network spots and feed status this tab holds, and the
     /// generation they are at.
-    pub(crate) fn spot_feed(&self) -> (u64, &[Spot], Option<&str>) {
-        (self.spots_gen, &self.spots, self.net_status.as_deref())
+    pub(crate) fn spot_feed(
+        &self,
+    ) -> (u64, &[Spot], Option<&str>, &[sdroxide_types::FreeDvStation]) {
+        (self.spots_gen, &self.spots, self.net_status.as_deref(), &self.freedv_stations)
     }
 
     /// Multi-radio: take the station radio's spots and feed status.
@@ -2225,8 +2231,10 @@ impl SdroxideApp {
         generation: u64,
         spots: &[Spot],
         status: Option<&str>,
+        freedv_stations: &[sdroxide_types::FreeDvStation],
     ) {
         self.adopted_spots_gen = Some(generation);
+        self.freedv_stations = freedv_stations.to_vec();
         self.spots = spots.to_vec();
         self.net_status = status.map(str::to_string);
     }

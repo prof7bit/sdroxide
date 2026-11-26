@@ -10,6 +10,8 @@ use sdroxide_types::{CallsignInfo, QsoRecord, Spot, SpotKind, UploadResult};
 pub enum NetEvent {
     /// The merged, de-duplicated, age-pruned spot set (manager → engine).
     Spots(Vec<Spot>),
+    /// The FreeDV Reporter station list, whole, on every change.
+    FreeDvStations(Vec<sdroxide_types::FreeDvStation>),
     /// Human-readable feed/connection status (`None` clears it).
     Status(Option<String>),
     /// A callsign-lookup result.

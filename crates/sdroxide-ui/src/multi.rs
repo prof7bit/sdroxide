@@ -1604,13 +1604,13 @@ impl MultiApp {
         if !self.tabs.iter().enumerate().any(|(i, t)| behind(i, t)) {
             return;
         }
-        let (spots, status) = {
-            let (_, spots, status) = self.tabs[src].app.spot_feed();
-            (spots.to_vec(), status.map(str::to_string))
+        let (spots, status, freedv) = {
+            let (_, spots, status, freedv) = self.tabs[src].app.spot_feed();
+            (spots.to_vec(), status.map(str::to_string), freedv.to_vec())
         };
         for (i, tab) in self.tabs.iter_mut().enumerate() {
             if behind(i, tab) {
-                tab.app.adopt_spot_feed(generation, &spots, status.as_deref());
+                tab.app.adopt_spot_feed(generation, &spots, status.as_deref(), &freedv);
             }
         }
     }

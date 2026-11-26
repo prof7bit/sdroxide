@@ -262,6 +262,9 @@ pub(crate) struct Latest {
     /// for `ism_reports`' reason: a label is a condition that is only sent
     /// again when it changes, and a logger may not re-send one for minutes.
     pub tci_spots: Vec<sdroxide_types::Spot>,
+    /// The FreeDV Reporter station list. Replayed on connect because it is
+    /// only sent again when something in it changes.
+    pub freedv_stations: Vec<sdroxide_types::FreeDvStation>,
     pub ism_status: Option<sdroxide_types::IsmStatus>,
     /// The aircraft the ADS-B decoder is tracking. Replayed on connect for the
     /// same reason the ISM table is: a target that has been overhead for five
@@ -1236,6 +1239,10 @@ fn handle_event(shared: &Shared, ev: RadioEvent) {
                 Some(ServerMsg::VoiceStatus(v))
             }
             RadioEvent::Spots(s) => Some(ServerMsg::Spots(s)),
+            RadioEvent::FreeDvStations(s) => {
+                latest.freedv_stations = s.clone();
+                Some(ServerMsg::FreeDvStations(s))
+            }
             RadioEvent::TciSpots(s) => {
                 latest.tci_spots = s.clone();
                 Some(ServerMsg::TciSpots(s))
