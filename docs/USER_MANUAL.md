@@ -16988,9 +16988,9 @@ only with others made from a matching revision. In practice:
   `RADEV2`. By default you are reported to FreeDV's server for V2 testing as well
   ([§6.6](#66-freedv-freedv-reporter)).
 
-**On the panadapter**, a reporter station's marker says **V1** or **V2** in
-place of **FREEDV** when it reports one of the two RADE versions, with V2 in a
-filled badge. Both versions are shown, whichever you have selected.
+**On the panadapter**, a reporter station's marker says **RADE V1** or
+**RADE V2** in place of **FREEDV** when it reports one of the two RADE versions,
+with V2 in a filled badge. Both versions are shown, whichever you have selected.
 
 **Who is on your frequency.** With the feature on, the RADE panel lists the other
 reporter stations within 1 kHz of your transmit frequency that report the RADE

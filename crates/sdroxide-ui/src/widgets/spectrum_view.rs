@@ -931,8 +931,8 @@ struct NetBox {
 fn net_spot_tag(spot: &Spot) -> (&'static str, bool) {
     if spot.kind == sdroxide_types::SpotKind::FreeDv {
         match spot.mode.as_str() {
-            "RADEV1" => return ("V1", false),
-            "RADEV2" => return ("V2", true),
+            "RADEV1" => return ("RADE V1", false),
+            "RADEV2" => return ("RADE V2", true),
             _ => {}
         }
     }
