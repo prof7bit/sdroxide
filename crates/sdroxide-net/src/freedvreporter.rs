@@ -39,12 +39,15 @@ use tungstenite::{Message, WebSocket};
 
 use sdroxide_types::{FreeDvReporterConfig, FreeDvStation, RadeVersion, Spot, SpotKind};
 
-use crate::event::{EventTx, FeedTx, NetEvent};
+use crate::freedvhub::Output;
 use crate::socketio::{self, Frame};
 
 /// What a station on the roster is taken to run when the server names no mode.
 /// What we report as our own follows [`RadeVersion::reporter_mode`].
 const MODE_STRING: &str = "RADEV1";
+
+/// The public server, used where no host is set.
+pub(crate) const DEFAULT_HOST: &str = "qso.freedv.org";
 
 /// The reporter protocol revision this client implements.
 const PROTOCOL_VERSION: i64 = 2;
@@ -144,19 +147,26 @@ impl ReporterHandle {
         cfg: FreeDvReporterConfig,
         call: String,
         grid: String,
-        feed: FeedTx,
-        events: EventTx,
+        out: Output,
+        report_only_on: Option<RadeVersion>,
     ) -> ReporterHandle {
         let (ctrl_tx, ctrl_rx) = crossbeam_channel::unbounded();
         let join = std::thread::Builder::new()
             // Linux caps thread names at 15 bytes.
             .name("sdroxide-fdvrep".into())
             .spawn(move || {
-                let mut r = Reporter::new(cfg, call, grid, feed, events, ctrl_rx);
+                let mut r = Reporter::new(cfg, call, grid, out, ctrl_rx);
+                r.report_only_on = report_only_on;
                 r.run_until(None);
             })
             .ok();
         ReporterHandle { ctrl: ctrl_tx, join }
+    }
+
+    /// Ask the thread to end, without waiting for it; dropping the handle
+    /// does the waiting.
+    pub(crate) fn stop(&self) {
+        let _ = self.ctrl.send(Ctrl::Shutdown);
     }
 
     pub fn set_freq(&self, hz: u64) {
@@ -434,14 +444,16 @@ struct Reporter {
     cfg: FreeDvReporterConfig,
     call: String,
     grid: String,
-    feed: FeedTx,
-    events: EventTx,
+    out: Output,
     ctrl: Receiver<Ctrl>,
 
     // ── Desired state, always current whether or not we are connected.
     freq: u64,
     tx: bool,
     version: RadeVersion,
+    /// `Some`: we only report while on this version. Otherwise the session is
+    /// a viewer, which lists the others and tells the server nothing about us.
+    report_only_on: Option<RadeVersion>,
     message: String,
     /// Starts false: we must not appear publicly before the engine has told us
     /// the radio is actually in RADE.
@@ -487,8 +499,7 @@ impl Reporter {
         cfg: FreeDvReporterConfig,
         call: String,
         grid: String,
-        feed: FeedTx,
-        events: EventTx,
+        out: Output,
         ctrl: Receiver<Ctrl>,
     ) -> Reporter {
         let message = cfg.message.clone();
@@ -496,12 +507,12 @@ impl Reporter {
             cfg,
             call,
             grid,
-            feed,
-            events,
+            out,
             ctrl,
             freq: 0,
             tx: false,
             version: RadeVersion::default(),
+            report_only_on: None,
             message,
             visible: false,
             ws: None,
@@ -528,7 +539,26 @@ impl Reporter {
     /// True when we have an identity to report. Without both a callsign and a
     /// grid the server puts us in the read-only "view" role.
     fn can_report(&self) -> bool {
-        !self.call.trim().is_empty() && !self.grid.trim().is_empty()
+        self.may_report() && !self.call.trim().is_empty() && !self.grid.trim().is_empty()
+    }
+
+    /// Whether the version in use is one this session reports.
+    fn may_report(&self) -> bool {
+        self.report_only_on.is_none_or(|v| v == self.version)
+    }
+
+    /// Leave and sign in again at once, because the role we sign in with has
+    /// changed. A role cannot be changed within a session.
+    fn rejoin(&mut self) {
+        let Some(mut ws) = self.ws.take() else { return };
+        let _ = ws.close(None);
+        let _ = ws.flush();
+        self.fully_connected = false;
+        self.my_sid = None;
+        // The new session is sent everybody again, under the same ids or not.
+        self.roster = Roster::default();
+        self.backoff = BACKOFF_MIN;
+        self.next_attempt = Instant::now();
     }
 
     /// The auth object sent in the socket.io CONNECT frame.
@@ -672,7 +702,7 @@ impl Reporter {
 
     fn open(&mut self) -> Result<Ws, String> {
         let host =
-            if self.cfg.host.trim().is_empty() { "qso.freedv.org" } else { self.cfg.host.trim() };
+            if self.cfg.host.trim().is_empty() { DEFAULT_HOST } else { self.cfg.host.trim() };
         let port = if self.cfg.port == 0 { 80 } else { self.cfg.port };
 
         let addr = (host, port)
@@ -802,10 +832,14 @@ impl Reporter {
         self.got_connection_successful = true;
         self.fully_connected = true;
         self.backoff = BACKOFF_MIN;
-        self.status(Some(format!(
-            "FreeDV Reporter: connected{}",
-            if self.can_report() { "" } else { " (view only — no callsign/grid)" }
-        )));
+        let role = if self.can_report() {
+            ""
+        } else if !self.may_report() {
+            " (view only on this RADE version)"
+        } else {
+            " (view only — no callsign/grid)"
+        };
+        self.status(Some(format!("FreeDV Reporter: connected{role}")));
         if self.visible {
             self.emit_freq();
             self.emit_tx();
@@ -831,9 +865,14 @@ impl Reporter {
             }
             Ctrl::Version(v) => {
                 if v != self.version {
+                    let reported = self.may_report();
                     self.version = v;
-                    // The mode travels in `tx_report`.
-                    self.emit_tx();
+                    if reported != self.may_report() {
+                        self.rejoin();
+                    } else {
+                        // The mode travels in `tx_report`.
+                        self.emit_tx();
+                    }
                 }
             }
             Ctrl::Message(m) => {
@@ -901,13 +940,13 @@ impl Reporter {
     // so reconnects replay the current state rather than a stale one.
 
     fn emit_freq(&mut self) {
-        if self.fully_connected {
+        if self.fully_connected && self.may_report() {
             self.report(socketio::emit("freq_change", Some(&json!({ "freq": self.freq }))));
         }
     }
 
     fn emit_tx(&mut self) {
-        if self.fully_connected {
+        if self.fully_connected && self.may_report() {
             self.report(socketio::emit(
                 "tx_report",
                 Some(&json!({
@@ -919,7 +958,7 @@ impl Reporter {
     }
 
     fn emit_message(&mut self) {
-        if self.fully_connected {
+        if self.fully_connected && self.may_report() {
             self.report(socketio::emit(
                 "message_update",
                 Some(&json!({ "message": self.message })),
@@ -973,12 +1012,19 @@ impl Reporter {
     fn publish_spots(&mut self) {
         self.roster_dirty = false;
         self.last_publish = Instant::now();
-        let spots = if self.cfg.show_spots {
+        let mut spots = if self.cfg.show_spots {
             self.roster.spots(now_utc(), self.my_sid.as_deref())
         } else {
             Vec::new()
         };
-        let _ = self.feed.send((SpotKind::FreeDv, spots));
+        // A sighting nobody reported is the server's own, whichever it is.
+        let host = self.cfg.host.trim();
+        if !host.is_empty() {
+            for s in spots.iter_mut().filter(|s| s.spotter == DEFAULT_HOST) {
+                s.spotter = host.to_string();
+            }
+        }
+        self.out.spots(spots);
     }
 
     /// Send the station list if it differs from the one last sent. Unlike the
@@ -990,7 +1036,7 @@ impl Reporter {
         let now = self.roster.stations(Instant::now(), self.my_sid.as_deref(), mode);
         if now != self.stations {
             self.stations = now.clone();
-            let _ = self.events.send(NetEvent::FreeDvStations(now));
+            self.out.stations(now);
         }
     }
 
@@ -1007,7 +1053,7 @@ impl Reporter {
         // immediately must not be retried in a tight loop either.
         self.schedule_retry();
         // Clear our markers immediately rather than letting them age out.
-        let _ = self.feed.send((SpotKind::FreeDv, Vec::new()));
+        self.out.spots(Vec::new());
         self.roster_dirty = false;
         self.last_publish = Instant::now();
     }
@@ -1017,7 +1063,7 @@ impl Reporter {
             let _ = ws.close(None);
             let _ = ws.flush();
         }
-        let _ = self.feed.send((SpotKind::FreeDv, Vec::new()));
+        self.out.spots(Vec::new());
         self.roster = Roster::default();
         self.publish_stations();
         self.status(None);
@@ -1028,7 +1074,7 @@ impl Reporter {
     fn status(&mut self, s: Option<String>) {
         if s != self.last_status {
             self.last_status = s.clone();
-            let _ = self.events.send(NetEvent::Status(s));
+            self.out.status(s);
         }
     }
 }
@@ -1120,7 +1166,8 @@ pub fn probe(host: &str, port: u16, secs: f64) -> ProbeSummary {
     let (_ctrl_tx, ctrl_rx) = crossbeam_channel::unbounded();
 
     // Empty callsign and grid force the read-only "view" role.
-    let mut r = Reporter::new(cfg, String::new(), String::new(), feed_tx, event_tx, ctrl_rx);
+    let out = Output::new(feed_tx, event_tx);
+    let mut r = Reporter::new(cfg, String::new(), String::new(), out, ctrl_rx);
     r.run_until(Some(Instant::now() + Duration::from_secs_f64(secs.max(1.0))));
 
     let mut stations: Vec<ProbeStation> = r
@@ -1165,8 +1212,7 @@ mod tests {
             FreeDvReporterConfig::default(),
             call.into(),
             grid.into(),
-            feed_tx,
-            event_tx,
+            Output::new(feed_tx, event_tx),
             ctrl_rx,
         )
     }
@@ -1565,11 +1611,36 @@ mod tests {
     }
 
     #[test]
+    fn a_v2_only_session_tells_nothing_about_us_on_v1() {
+        let mut rep = reporter("OE1TKJ", "JN88dd");
+        rep.report_only_on = Some(RadeVersion::V2);
+        let auth = rep.auth();
+        assert_eq!(auth["role"], "view");
+        assert!(auth.get("callsign").is_none() && auth.get("grid_square").is_none());
+        // Nothing counts as sent either, though the session is up.
+        rep.fully_connected = true;
+        rep.visible = true;
+        let before = rep.last_report;
+        std::thread::sleep(Duration::from_millis(2));
+        rep.emit_freq();
+        rep.emit_tx();
+        rep.emit_message();
+        rep.emit_rx_report("K1ABC", 3);
+        rep.emit_rx_presence(3);
+        assert_eq!(rep.last_report, before);
+        assert!(!rep.keepalive_due(before + KEEPALIVE_INTERVAL));
+
+        rep.apply(Ctrl::Version(RadeVersion::V2));
+        assert_eq!(rep.auth()["role"], "report");
+        assert_eq!(rep.auth()["callsign"], "OE1TKJ");
+    }
+
+    #[test]
     fn spots_are_suppressed_when_show_spots_is_off() {
         let mut rep = reporter("", "");
         rep.cfg.show_spots = false;
         let (feed_tx, feed_rx) = crossbeam_channel::unbounded();
-        rep.feed = feed_tx;
+        rep.out = Output::new(feed_tx, crossbeam_channel::unbounded().0);
         rep.roster.on_event("new_connection", &connect_ev("s1", "K1ABC", "FN42"));
         rep.roster.on_event("freq_change", &json!({ "sid": "s1", "freq": 14_236_000u64 }));
         rep.publish_spots();

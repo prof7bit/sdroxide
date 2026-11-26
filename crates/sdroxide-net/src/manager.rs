@@ -16,7 +16,7 @@ use sdroxide_types::{
 
 use crate::cluster::ClusterHandle;
 use crate::event::{EventTx, FeedBatch, FeedTx, NetEvent};
-use crate::freedvreporter::ReporterHandle;
+use crate::freedvhub::ReporterGroup;
 use crate::poll::{self, PollHandle};
 use crate::rbn::RbnHandle;
 use crate::wsprnet::{self, WsprPollHandle, WsprUploadHandle};
@@ -62,7 +62,7 @@ pub struct SpotManager {
     /// WSPRnet download poller: who heard us.
     wspr_heard_us: Option<WsprPollHandle>,
 
-    freedv: Option<ReporterHandle>,
+    freedv: Option<ReporterGroup>,
     /// What we last told the reporter. Replayed into a freshly rebuilt session
     /// so a config change never leaves the site showing a stale frequency.
     rep_freq: u64,
@@ -729,7 +729,7 @@ impl SpotManager {
         if !self.cfg.freedv_reporter.enabled {
             return;
         }
-        let h = ReporterHandle::connect(
+        let h = ReporterGroup::connect(
             self.cfg.freedv_reporter.clone(),
             self.op_call.clone(),
             self.op_grid.clone(),

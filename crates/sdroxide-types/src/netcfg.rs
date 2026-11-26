@@ -162,6 +162,9 @@ pub struct FreeDvReporterConfig {
     pub report_rx: bool,
     /// Surface other reporter stations as spots on the panadapter and map.
     pub show_spots: bool,
+    /// A second server to report to and list stations from as well, with the
+    /// same settings, on port 80. Empty means none.
+    pub second_host: String,
 }
 
 impl Default for FreeDvReporterConfig {
@@ -175,6 +178,8 @@ impl Default for FreeDvReporterConfig {
             message: String::new(),
             report_rx: true,
             show_spots: true,
+            // Where FreeDV's RADE V2 testers gather for now.
+            second_host: "reporter-radev2.k6aq.net".to_string(),
         }
     }
 }

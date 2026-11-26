@@ -9,6 +9,7 @@
 
 mod cluster;
 mod event;
+mod freedvhub;
 mod freedvreporter;
 mod http;
 mod lookup;

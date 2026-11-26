@@ -1794,7 +1794,9 @@ use sdroxide_types::{
 ///
 /// 61225: `FreeDvStation` gains `grid`, `version` and `message`, on the same
 /// upstream base, so the thousands move instead.
-pub const PROTO_VERSION: u16 = 61_225;
+///
+/// 62225: `FreeDvReporterConfig` gains `second_host` on its tail.
+pub const PROTO_VERSION: u16 = 62_225;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

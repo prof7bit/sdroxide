@@ -14402,6 +14402,13 @@ tab itself is:
 - **Server → Host** and **Port** — the public server (`qso.freedv.org:80`) by
   default. **TLS (wss://)** is greyed out: it is not implemented yet, and FreeDV
   GUI uses plain `ws://` too.
+- **Server → 2nd host** — a second server to use at the same time, on port 80;
+  by default `reporter-radev2.k6aq.net`, where FreeDV's RADE V2 testers gather
+  for now. You are reported to it only while on **RADE V2**; on V1 sdroxide
+  signs in there as a viewer and sends nothing about your station. On V2 both
+  servers are told the same. Stations are always read from both and combined:
+  one that both list with the same callsign and locator, within 1 kHz, appears
+  once. Leave the field empty to use only the first server.
 - **Reporting → Report stations I decode** sends a reception report for each
   callsign recovered from a received End-of-Over frame. **Show other reporter
   stations as spots** adds them to the panadapter, world map and SPOTS window
@@ -16977,8 +16984,9 @@ only with others made from a matching revision. In practice:
   seconds, so it appears while the station is still talking. It needs at least
   about 4.5 s of good signal. Only A–Z, 0–9 and `/` are sent, up to 32
   characters.
-- **FreeDV Reporter** is the same server as for V1. Each report names the
-  version, so the site lists you as `RADEV2`.
+- **FreeDV Reporter** reports name the version, so a server lists you as
+  `RADEV2`. By default you are reported to FreeDV's server for V2 testing as well
+  ([§6.6](#66-freedv-freedv-reporter)).
 
 **Who is on your frequency.** With the feature on, the RADE panel lists the other
 reporter stations within 1 kHz of your transmit frequency that report the RADE

@@ -691,6 +691,8 @@ settings-net-message = Nachricht
 settings-net-receive-only-i-cannot-transmit = Nur Empfang (ich kann nicht senden)
 settings-net-server = Server
 settings-net-host = Host
+settings-net-second-host = 2. Host
+settings-net-second-host-note = Listet immer auch die Stationen dieses Servers auf und meldet bei RADE V2 zusätzlich dorthin (Port 80). Leer = keiner.
 settings-net-port = Port
 settings-net-tls-wss = TLS (wss://)
 settings-net-not-yet-implemented-freedv-gui = Noch nicht umgesetzt — die FreeDV-GUI nutzt ebenfalls einfaches ws://.

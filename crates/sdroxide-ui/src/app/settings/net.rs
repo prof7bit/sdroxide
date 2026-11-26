@@ -103,6 +103,12 @@ pub(in crate::app) fn settings_freedv_tab(
             ui.add_sized([96.0, 22.0], egui::Label::new(tr!("settings-net-port")));
             ui.add(egui::DragValue::new(&mut c.port).range(1..=65535));
         });
+        net_row(ui, &tr!("settings-net-second-host"), &mut c.second_host, 220.0);
+        ui.label(
+            RichText::new(tr!("settings-net-second-host-note"))
+                .size(10.5)
+                .color(crate::theme::gray(140)),
+        );
         ui.add_enabled_ui(false, |ui| {
             crate::chrome::checkbox(ui, &mut c.tls, tr!("settings-net-tls-wss"))
                 .on_hover_text(tr!("settings-net-not-yet-implemented-freedv-gui"));
