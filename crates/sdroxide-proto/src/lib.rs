@@ -1784,10 +1784,13 @@ use sdroxide_types::{
 /// `pa_enable` on its tail, which changes every state frame, and `Command`
 /// gains a trailing `SetPa`.
 ///
-/// v226: RADE V2. `DigiConfig` gains `rade_version` on its tail, which changes
-/// `Command::SetDigiConfig` and every `DigiStatus`, and `RadeStatus` gains
-/// `mistune` on its tail, so a v225 peer fails to decode either.
-pub const PROTO_VERSION: u16 = 226;
+/// 60225: private RADE V2 build on top of upstream's v225. `DigiConfig` gains
+/// `rade_version` on its tail, which changes `Command::SetDigiConfig` and every
+/// `DigiStatus`, and `RadeStatus` gains `mistune` on its tail, so a v225 peer
+/// fails to decode either. Not the next number up, which upstream will use for
+/// something else: it is 60000 plus the upstream version underneath, and has to
+/// follow that version whenever upstream is merged.
+pub const PROTO_VERSION: u16 = 60_225;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]
