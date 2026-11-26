@@ -36,6 +36,10 @@ const RING_SECS: f64 = 1.0;
 const POLL: Duration = Duration::from_millis(5);
 /// Speech level decays this fast per output block, so the UI meter falls back.
 const LEVEL_DECAY: f32 = 0.85;
+/// Silence that pushes the end of an over out of the transmit resampler, in
+/// modem-rate samples. It converts whole blocks of 1024 only; this is more
+/// than one of them.
+const TX_DRAIN: usize = 1_100;
 /// The same fall-back on transmit, per 10 ms vocoder frame: [`LEVEL_DECAY`]
 /// once per 120 ms.
 const TX_LEVEL_DECAY: f32 = 0.987;
@@ -167,6 +171,7 @@ impl RadeWorker {
             rx_up: MonoResampler::new(SPEECH_RATE, audio_rate),
             tx_down: MonoResampler::new(audio_rate, SPEECH_RATE),
             tx_up: MonoResampler::new(MODEM_RATE, audio_rate),
+            audio_rate,
             buf8: Vec::new(),
             buf16: Vec::new(),
             features: Vec::new(),
@@ -356,6 +361,7 @@ struct Inner {
     rx_up: Option<MonoResampler>,   // 16 kHz -> audio rate
     tx_down: Option<MonoResampler>, // audio rate -> 16 kHz
     tx_up: Option<MonoResampler>,   // 8 kHz -> audio rate
+    audio_rate: f64,
 
     buf8: Vec<f32>,        // modem-rate receive audio awaiting `nin`
     buf16: Vec<f32>,       // 16 kHz mic audio awaiting a vocoder frame
@@ -471,6 +477,7 @@ impl Inner {
             }
             self.emit_tx_iq();
             self.flush_tx_filter();
+            self.drain_tx_resampler();
             self.buf16.clear();
             self.tx_features.clear();
             while self.tx_in.pop().is_ok() {}
@@ -686,6 +693,20 @@ impl Inner {
         self.scratch.resize(self.tx_filter.tail_len(), 0.0);
         self.tx_filter.process(&mut self.scratch);
         self.send_tx_audio();
+    }
+
+    /// Send what the resampler still holds of the over. Without this up to
+    /// 128 ms stayed behind: the end of the End-of-Over frame, and with it
+    /// V1's callsign, which then went out ahead of the next over instead.
+    fn drain_tx_resampler(&mut self) {
+        if self.tx_up.is_none() {
+            return;
+        }
+        self.scratch.clear();
+        self.scratch.resize(TX_DRAIN, 0.0);
+        self.send_tx_audio();
+        // A fresh one, so the next over does not begin with the leftover.
+        self.tx_up = MonoResampler::new(MODEM_RATE, self.audio_rate);
     }
 
     /// Resample the modem-rate audio in `self.scratch` up for the transmit

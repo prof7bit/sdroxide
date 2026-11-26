@@ -267,6 +267,80 @@ fn worker_transmits_an_over_that_decodes_back() {
     );
 }
 
+/// The End-of-Over frame must get out whole, whatever the length of the over
+/// leaves in the transmit resampler's last block, with the transmit filter and
+/// without it. Its callsign is the proof.
+#[test]
+fn the_end_of_every_over_gets_out() {
+    let _g = exclusive();
+    const AUDIO_RATE: f64 = 48_000.0;
+    let (audio, _) = read_wav(&sample("david_vk5dgr.wav"));
+    let mut mic = Vec::new();
+    sdroxide_dsp::MonoResampler::new(SPEECH_RATE, AUDIO_RATE)
+        .expect("upsampler")
+        .push(&audio, &mut mic);
+
+    for filter in [false, true] {
+        let mut worker = RadeWorker::new(AUDIO_RATE, AUDIO_RATE).expect("worker");
+        worker.set_callsign(TEST_CALL);
+        worker.set_tx_filter(filter);
+        // Overs one modem frame apart each leave a different remainder; the
+        // same worker, so a leftover would also spoil the next one.
+        let overs: Vec<Vec<f32>> = (0..6)
+            .map(|k| {
+                worker.set_tx(true);
+                // One sample at a time: a longer buffer can come back with
+                // silence in the middle while the worker is still writing.
+                let (mut one, mut modem) = ([0.0f32; 1], Vec::new());
+                for chunk in mic[..(3 * 48_000 + k * 5_760)].chunks(480) {
+                    while worker.tx_pending() > 4_800 {
+                        while worker.pop_tx(&mut one) == 1 {
+                            modem.push(one[0]);
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                    worker.push_mic(chunk);
+                }
+                worker.set_tx(false);
+                for _ in 0..1_000 {
+                    while worker.pop_tx(&mut one) == 1 {
+                        modem.push(one[0]);
+                    }
+                    if worker.tx_drained() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                assert!(worker.tx_drained());
+                modem
+            })
+            .collect();
+        drop(worker);
+
+        for (k, mut modem) in overs.into_iter().enumerate() {
+            modem.resize(modem.len() + AUDIO_RATE as usize / 2, 0.0);
+            let mut down = Vec::new();
+            sdroxide_dsp::MonoResampler::new(AUDIO_RATE, MODEM_RATE)
+                .expect("downsampler")
+                .push(&modem, &mut down);
+            let mut rade = Rade::open_v1().expect("open");
+            let (mut feats, mut eoo, mut pos, mut heard) = (Vec::new(), Vec::new(), 0, None);
+            while pos < down.len() {
+                let nin = rade.nin();
+                let mut blk = vec![Complex32::default(); nin];
+                for (dst, &src) in blk.iter_mut().zip(&down[pos..]) {
+                    *dst = Complex32::new(src * RX_REAL_SCALE, 0.0);
+                }
+                pos += nin;
+                if rade.rx(&blk, &mut feats, &mut eoo).expect("rx").has_eoo {
+                    heard = heard.or_else(|| text::decode(&eoo));
+                }
+            }
+            assert_eq!(heard.as_deref(), Some(TEST_CALL), "over {k}, filter {filter}");
+        }
+    }
+}
+
 #[test]
 fn worker_survives_chunk_sizes_unrelated_to_nin() {
     let _g = exclusive();
