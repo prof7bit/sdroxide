@@ -333,12 +333,23 @@ impl Roster {
                 freq_hz: s.freq_hz,
                 tx: s.tx,
                 rx_snr_db: s.receiving.filter(|&(_, until)| now < until).map(|(snr, _)| snr),
+                grid: s.grid.clone(),
+                version: s.version.clone(),
+                message: s.message.clone(),
             })
             .collect();
         // The whole tuple, so that one call signed in twice cannot swap places
         // with the map's iteration order and look like a change.
         v.sort_by(|a, b| {
-            (&a.call, a.freq_hz, a.tx, a.rx_snr_db).cmp(&(&b.call, b.freq_hz, b.tx, b.rx_snr_db))
+            (&a.call, a.freq_hz, a.tx, a.rx_snr_db, &a.grid, &a.version, &a.message).cmp(&(
+                &b.call,
+                b.freq_hz,
+                b.tx,
+                b.rx_snr_db,
+                &b.grid,
+                &b.version,
+                &b.message,
+            ))
         });
         v
     }
@@ -1418,6 +1429,9 @@ mod tests {
 
         r.on_event("tx_report", &json!({ "sid": "b", "transmitting": true }));
         assert!(list(&r, Duration::ZERO)[1].tx);
+
+        r.on_event("message_update", &json!({ "sid": "b", "message": "QRV" }));
+        assert_eq!(list(&r, Duration::ZERO)[1].message, "QRV");
 
         r.on_event("remove_connection", &json!({ "sid": "a" }));
         assert_eq!(list(&r, Duration::ZERO).len(), 1);

@@ -1791,7 +1791,10 @@ use sdroxide_types::{
 /// something else: it is 60000 plus the upstream version underneath, and has to
 /// follow that version whenever upstream is merged. `ServerMsg` also gains a
 /// trailing `FreeDvStations`.
-pub const PROTO_VERSION: u16 = 60_225;
+///
+/// 61225: `FreeDvStation` gains `grid`, `version` and `message`, on the same
+/// upstream base, so the thousands move instead.
+pub const PROTO_VERSION: u16 = 61_225;
 const VERSION_BYTE: u8 = 0x12;
 
 #[derive(Debug, thiserror::Error)]

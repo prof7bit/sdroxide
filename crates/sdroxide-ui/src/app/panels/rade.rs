@@ -12,11 +12,77 @@ use crate::app::{SdroxideApp, tx_gated};
 
 /// How far from our own frequency a station may be and still be listed.
 const NEARBY_HZ: u64 = 1_000;
-/// Column positions of the station list, from its left edge: narrow enough for
-/// a phone.
-const STATUS_X: f32 = 110.0;
-const SNR_RIGHT_X: f32 = 220.0;
+/// Column positions of the station list, from its left edge. The first four
+/// are narrow enough for a phone.
+const STATUS_X: f32 = 100.0;
+const SNR_RIGHT_X: f32 = 190.0;
+const KM_RIGHT_X: f32 = 275.0;
+/// Where software and message go: on the same line from [`ONE_LINE_W`] on,
+/// otherwise on a second one.
+const VERSION_X: f32 = 295.0;
+const VERSION_W: f32 = 245.0;
+const ONE_LINE_W: f32 = 760.0;
 const ROW_H: f32 = 18.0;
+
+/// One line of the station list: the text of each column.
+#[derive(Default)]
+struct StationCells<'a> {
+    call: &'a str,
+    status: &'a str,
+    snr: &'a str,
+    km: &'a str,
+    version: &'a str,
+    message: &'a str,
+}
+
+fn station_row(
+    ui: &mut egui::Ui,
+    tint: Option<egui::Color32>,
+    c: &StationCells,
+    color: egui::Color32,
+) -> egui::Response {
+    let width = ui.available_width();
+    let one_line = width >= ONE_LINE_W;
+    let two_lines = !one_line && !(c.version.is_empty() && c.message.is_empty());
+    let height = if two_lines { 2.0 * ROW_H } else { ROW_H };
+    // No gap between rows: the tint is what separates them.
+    let (r, resp) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let p = ui.painter_at(r);
+    if let Some(tint) = tint {
+        p.rect_filled(r, 0.0, tint);
+    }
+    let font = egui::FontId::monospace(12.0);
+    let first = r.top() + ROW_H / 2.0;
+    let left = egui::Align2::LEFT_CENTER;
+    let right = egui::Align2::RIGHT_CENTER;
+    for (text, x, align) in [
+        (c.call, 4.0, left),
+        (c.status, STATUS_X, left),
+        (c.snr, SNR_RIGHT_X, right),
+        (c.km, KM_RIGHT_X, right),
+    ] {
+        p.text(egui::pos2(r.left() + x, first), align, text, font.clone(), color);
+    }
+    if one_line {
+        // Clipped to its column, so a long one cannot run into the message.
+        let column = egui::Rect::from_min_size(
+            egui::pos2(r.left() + VERSION_X, r.top()),
+            egui::vec2(VERSION_W, ROW_H),
+        );
+        ui.painter_at(column).text(column.left_center(), left, c.version, font.clone(), color);
+        let x = r.left() + VERSION_X + VERSION_W + 12.0;
+        p.text(egui::pos2(x, first), left, c.message, font, color);
+    } else if two_lines {
+        let text = match (c.version.is_empty(), c.message.is_empty()) {
+            (false, false) => format!("{} · {}", c.message, c.version),
+            (false, true) => c.version.to_string(),
+            _ => c.message.to_string(),
+        };
+        let at = egui::pos2(r.left() + 16.0, first + ROW_H);
+        p.text(at, left, text, egui::FontId::monospace(11.0), color);
+    }
+    resp
+}
 
 impl SdroxideApp {
     pub(in crate::app) fn rade_panel(
@@ -239,61 +305,72 @@ impl SdroxideApp {
         });
     }
 
-    /// Who else FreeDV Reporter has on this frequency. A row is tinted while
-    /// that station transmits, or while it reports receiving something.
+    /// Who else FreeDV Reporter has on this frequency, nearest first. A row is
+    /// tinted while that station transmits, or while it reports receiving
+    /// something.
     fn rade_station_list(&self, ui: &mut egui::Ui) {
         let ours = self.state.tx_freq_hz().round().max(0.0) as u64;
-        let mut rows = self
+        let my_grid = &self.digi_cfg_edit.my_grid;
+        let mut rows: Vec<_> = self
             .freedv_stations
             .iter()
             .filter(|s| s.freq_hz.abs_diff(ours) <= NEARBY_HZ)
-            .peekable();
-        if rows.peek().is_none() {
+            .map(|s| (sdroxide_types::grid_distance_km(my_grid, &s.grid), s))
+            .collect();
+        if rows.is_empty() {
             ui.label(
                 RichText::new(tr!("rade-no-stations")).size(11.0).color(crate::theme::gray(125)),
             );
             return;
         }
-        let row = |ui: &mut egui::Ui,
-                   tint: Option<egui::Color32>,
-                   cells: [(&str, egui::Color32); 3]| {
-            let (r, _) = ui
-                .allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), egui::Sense::hover());
-            let p = ui.painter_at(r);
-            if let Some(tint) = tint {
-                p.rect_filled(r, 0.0, tint);
-            }
-            let font = egui::FontId::monospace(12.0);
-            let places = [
-                (4.0, egui::Align2::LEFT_CENTER),
-                (STATUS_X, egui::Align2::LEFT_CENTER),
-                (SNR_RIGHT_X, egui::Align2::RIGHT_CENTER),
-            ];
-            for ((text, color), (x, align)) in cells.into_iter().zip(places) {
-                p.text(egui::pos2(r.left() + x, r.center().y), align, text, font.clone(), color);
-            }
+        // Unknown distances last. The list arrives sorted by callsign, and the
+        // sort is stable, so equal distances stay in that order.
+        rows.sort_by(|a, b| a.0.unwrap_or(f64::MAX).total_cmp(&b.0.unwrap_or(f64::MAX)));
+
+        ui.spacing_mut().item_spacing.y = 1.0;
+        let wide = ui.available_width() >= ONE_LINE_W;
+        let (call, status, snr) =
+            (tr!("rade-col-call"), tr!("rade-col-status"), tr!("rade-col-snr"));
+        let (version, message) = (tr!("rade-col-version"), tr!("rade-col-message"));
+        let header = StationCells {
+            call: &call,
+            status: &status,
+            snr: &snr,
+            km: "km",
+            // The second line of a narrow list goes without a heading.
+            version: if wide { &version } else { "" },
+            message: if wide { &message } else { "" },
         };
-        let dim = crate::theme::gray(125);
-        row(
-            ui,
-            None,
-            [
-                (&tr!("rade-col-call"), dim),
-                (&tr!("rade-col-status"), dim),
-                (&tr!("rade-col-snr"), dim),
-            ],
-        );
-        let text = crate::theme::TEXT_STRONG();
-        for s in rows {
+        station_row(ui, None, &header, crate::theme::gray(125));
+        for (km, s) in rows {
             // Transmitting wins, as on the reporter's own page.
             let (tint, status, snr) = if s.tx {
                 (Some(crate::theme::ALERT().gamma_multiply(0.35)), "TX", None)
             } else {
-                let tint = s.rx_snr_db.map(|_| crate::theme::GREEN().gamma_multiply(0.30));
+                // Yellow for a weak one, at or below 0 dB.
+                let tint = s.rx_snr_db.map(|db| {
+                    let color = if db > 0 { crate::theme::GREEN() } else { crate::theme::YELLOW() };
+                    color.gamma_multiply(0.30)
+                });
                 (tint, "RX", s.rx_snr_db)
             };
             let snr = snr.map(|db| format!("{db} dB")).unwrap_or_default();
-            row(ui, tint, [(&s.call, text), (status, text), (&snr, text)]);
+            let km = km.map(|km| format!("{km:.0}")).unwrap_or_default();
+            // Free text from a stranger: keep it to its one line.
+            let message = s.message.replace(['\r', '\n'], " ");
+            let cells = StationCells {
+                call: &s.call,
+                status,
+                snr: &snr,
+                km: &km,
+                version: &s.version,
+                message: &message,
+            };
+            let resp = station_row(ui, tint, &cells, crate::theme::TEXT_STRONG());
+            // Whatever the width cut off.
+            if !message.is_empty() || !s.version.is_empty() {
+                resp.on_hover_text(format!("{message}\n{}", s.version).trim().to_string());
+            }
         }
     }
 }

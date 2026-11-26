@@ -16983,10 +16983,14 @@ only with others made from a matching revision. In practice:
 **Who is on your frequency.** With the feature on, the RADE panel lists the other
 reporter stations within 1 kHz of your transmit frequency that report the RADE
 version you have selected (**V1** lists `RADEV1`, **V2** lists `RADEV2`),
-whatever software they run. **TX/RX** shows whether each one is transmitting. A station
+whatever software they run. They are sorted nearest first, by the distance
+between their locator and yours; those without a usable one come last. Each
+shows its distance in km, its software and its status message. In a narrow
+panel, such as on a phone, message and software take a second line; point at a
+row to read what was cut off. **TX/RX** shows whether each one is transmitting. A station
 that reports receiving a signal also shows that **SNR**; whose signal it is is
-not shown. Rows are tinted red while a station transmits and green while it is
-receiving. As in FreeDV GUI, the SNR stays for 20 s after the last report naming
+not shown. Rows are tinted red while a station transmits. While it is receiving they
+are green above 0 dB SNR and yellow at 0 dB or less. As in FreeDV GUI, the SNR stays for 20 s after the last report naming
 a callsign and 5 s after an unnamed one. The list does not depend on showing
 reporter stations as spots.
 

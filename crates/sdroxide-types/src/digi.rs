@@ -659,6 +659,12 @@ pub struct FreeDvStation {
     /// While the station is receiving a signal, the SNR it reports for it;
     /// whose signal that is does not matter here.
     pub rx_snr_db: Option<i16>,
+    /// Its Maidenhead locator, as signed in with; may be empty.
+    pub grid: String,
+    /// The software it says it runs; may be empty.
+    pub version: String,
+    /// The free-text status line it has set; usually empty.
+    pub message: String,
 }
 
 /// Live state of the RADE modem.
