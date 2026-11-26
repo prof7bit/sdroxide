@@ -924,6 +924,24 @@ struct NetBox {
     idx: usize,
 }
 
+/// The badge behind a network spot's call, and whether it is filled. A FreeDV
+/// station on RADE shows its version instead of the kind: the two cannot work
+/// each other, and V2 is filled so they are told apart at a glance without
+/// needing a second colour.
+fn net_spot_tag(spot: &Spot) -> (&'static str, bool) {
+    if spot.kind == sdroxide_types::SpotKind::FreeDv {
+        match spot.mode.as_str() {
+            "RADEV1" => return ("V1", false),
+            "RADEV2" => return ("V2", true),
+            _ => {}
+        }
+    }
+    (spot.kind.label(), false)
+}
+
+/// Space either side of the text in a filled badge.
+const NET_CHIP_PAD: f32 = 2.0;
+
 fn net_spot_width(p: &egui::Painter, spot: &Spot) -> f32 {
     let fs = crate::theme::skimmer_font_scale();
     let mut w = 2.0 * NET_PAD;
@@ -931,14 +949,14 @@ fn net_spot_width(p: &egui::Painter, spot: &Spot) -> f32 {
         .layout_no_wrap(spot.call.clone(), FontId::monospace(NET_CALL_PT * fs), Color32::WHITE)
         .size()
         .x;
+    let (tag, filled) = net_spot_tag(spot);
     w += 6.0
-        + p.layout_no_wrap(
-            spot.kind.label().to_string(),
-            FontId::monospace(NET_TAG_PT * fs),
-            Color32::WHITE,
-        )
-        .size()
-        .x;
+        + p.layout_no_wrap(tag.to_string(), FontId::monospace(NET_TAG_PT * fs), Color32::WHITE)
+            .size()
+            .x;
+    if filled {
+        w += 2.0 * NET_CHIP_PAD;
+    }
     w.clamp(40.0, 220.0 * fs)
 }
 
@@ -1186,14 +1204,22 @@ fn draw_net_box(p: &egui::Painter, b: &NetBox, spot: &Spot, hovered: bool, alpha
     let g = p.layout_no_wrap(spot.call.clone(), FontId::monospace(NET_CALL_PT * fs), call_col);
     p.galley(pos2(x, cy - g.size().y * 0.5), g.clone(), call_col);
     x += g.size().x + 6.0;
-    let tag_col = fade(crate::theme::scope_gray(180), alpha);
-    let tg = p.layout_no_wrap(
-        spot.kind.label().to_string(),
-        FontId::monospace(NET_TAG_PT * fs),
-        tag_col,
-    );
-    if x + tg.size().x <= rect.right() - NET_PAD {
-        p.galley(pos2(x, cy - tg.size().y * 0.5), tg, tag_col);
+    let (tag, filled) = net_spot_tag(spot);
+    // Filled: the box's own ground as ink, on the marker's colour.
+    let tag_col = if filled {
+        fade(Color32::from_rgb(6, 12, 20), alpha)
+    } else {
+        fade(crate::theme::scope_gray(180), alpha)
+    };
+    let tg = p.layout_no_wrap(tag.to_string(), FontId::monospace(NET_TAG_PT * fs), tag_col);
+    let chip_pad = if filled { NET_CHIP_PAD } else { 0.0 };
+    if x + tg.size().x + 2.0 * chip_pad <= rect.right() - NET_PAD {
+        let at = pos2(x + chip_pad, cy - tg.size().y * 0.5);
+        if filled {
+            let chip = Rect::from_min_size(at, tg.size()).expand2(vec2(chip_pad, 0.0));
+            p.rect_filled(chip, 2.0, fade(border, alpha));
+        }
+        p.galley(at, tg, tag_col);
     }
 }
 
