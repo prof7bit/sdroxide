@@ -1106,13 +1106,20 @@ impl Reporter {
     }
 }
 
-/// Marks this as a private build, so that nobody takes what it does on the air
-/// for the release of the same number.
-const BUILD_TAG: &str = "radev2-test-DD4UG";
+/// Counts the private builds on one upstream version, and starts again at 1 on
+/// the next one. Raise it with every build that is given out.
+const BUILD_NUMBER: u32 = 1;
+
+/// The name of this private build, also its Git tag. It stands where the plain
+/// version number would, so that nobody takes what it does on the air for the
+/// release of the same number.
+fn build_tag() -> String {
+    format!("radev2-{}-DD4UG-{BUILD_NUMBER}", env!("CARGO_PKG_VERSION"))
+}
 
 /// What we tell the reporter we are running.
 fn software_version() -> String {
-    format!("SDRoxide {}+{BUILD_TAG}", env!("CARGO_PKG_VERSION"))
+    format!("SDRoxide {}", build_tag())
 }
 
 /// One `rx_report` frame. An empty `callsign` is an unidentified reception
@@ -1465,7 +1472,7 @@ mod tests {
     fn software_version_is_branded() {
         assert_eq!(
             software_version(),
-            format!("SDRoxide {}+{BUILD_TAG}", env!("CARGO_PKG_VERSION"))
+            format!("SDRoxide radev2-{}-DD4UG-{BUILD_NUMBER}", env!("CARGO_PKG_VERSION"))
         );
     }
 
