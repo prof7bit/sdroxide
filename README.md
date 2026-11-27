@@ -1,3 +1,21 @@
+> ## ⚠️ About this branch
+>
+> This is **not an official SDR Oxide release**. It is `rade-v2`, my private, experimental branch, based on version 1.7.4 and made for me and my friends to try out **FreeDV RADE V2**.
+> Expect rough edges and possible incompatibilities (RADE V2 itself is still in development), and please don't report problems with it to the upstream project; the rest of this README describes the official program.
+>
+> - **RADE V2** next to V1, switchable on the RADE panel, also from remote and web clients
+> - **LSB/USB** switch for RADE, following the sideband of reported stations
+> - **Station list** on the RADE panel: TX/RX, SNR, distance, sideband, software, message
+> - **FreeDV Reporter:** additionally uses the RADE V2 test server; V1/V2 markers on the panadapter
+> - **Transmit:** narrow TX filter (switchable), speech level meter, fix for cut-off ends of overs
+> - **Not compatible** with official remote clients and servers: use this build on both ends
+>
+> Download: [Releases](https://github.com/prof7bit/sdroxide/releases) (x86_64 Linux AppImage only, glibc 2.35 or newer)
+>
+> Many thanks to [dividebysandwich](https://github.com/dividebysandwich/sdroxide), the original author, for this great work; I will keep supporting and recommending the original project. **The Ko-fi button below is for the original author, not for me.**
+
+<hr/>
+
 # SDR Oxide
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/W7J0271P9Q)
 
