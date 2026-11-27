@@ -640,6 +640,14 @@ pub enum RadeVersion {
 }
 
 impl RadeVersion {
+    /// The outermost carriers of the waveform, in Hz of audio from the dial.
+    pub fn carrier_edges_hz(self) -> (f32, f32) {
+        match self {
+            RadeVersion::V1 => (750.0, 2200.0),
+            RadeVersion::V2 => (1062.5, 1875.0),
+        }
+    }
+
     /// What FreeDV Reporter calls this waveform.
     pub fn reporter_mode(self) -> &'static str {
         match self {

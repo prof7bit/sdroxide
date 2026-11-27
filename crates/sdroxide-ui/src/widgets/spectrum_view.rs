@@ -2906,8 +2906,10 @@ pub fn show_ext(
         }
     }
 
-    // The audio-offset cursor (cyan) at dial + offset.
-    if let Some(a) = cursor_hz {
+    // The audio-offset cursor (cyan) at dial + offset. Not drawn on RADE: there
+    // is no offset to choose there, and a line through the middle of the signal
+    // only hides what the waterfall shows at that spot.
+    if let Some(a) = cursor_hz.filter(|_| !state.rx[0].mode.is_rade()) {
         let hz = state.rx_freq_hz() + a as f64;
         if in_view(hz) {
             let x = view.freq_to_x(hz, &rect);

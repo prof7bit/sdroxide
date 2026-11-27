@@ -1430,9 +1430,12 @@ impl SdroxideApp {
             // The painting band edges (300..3300 Hz).
             vec![300.0, 3300.0]
         } else if mode == Mode::Rade {
-            // The RADE V1 OFDM carriers, so the operator can see whether the
-            // signal is sitting inside the modem's window.
-            vec![side * 1062.0, side * 1876.0]
+            // The outer OFDM carriers of the selected version, so the operator
+            // can see whether the signal is sitting inside the modem's window.
+            let version =
+                self.digi_status.as_ref().map(|s| s.config.rade_version).unwrap_or_default();
+            let (low, high) = version.carrier_edges_hz();
+            vec![side * low, side * high]
         } else {
             Vec::new()
         };
@@ -1452,10 +1455,12 @@ impl SdroxideApp {
             // band rather than stacked in one window, and dragging mark and
             // space onto each one in turn walks them out of the transmit
             // filter. There a click tunes the dial so the signal lands on the
-            // pair, exactly as CW does.
+            // pair, exactly as CW does. Nor on RADE, whose carriers are fixed:
+            // click the middle of a signal, and the dial goes where that puts
+            // it between them (in tuning steps).
             cursor: Some(spectrum_view::AudioCursor {
                 hz: audio_hz,
-                click_sets_offset: !mode.holds_standard_tones(),
+                click_sets_offset: !mode.holds_standard_tones() && !mode.is_rade(),
                 // CW only for now: RTTY and WEFAX sit off their dials too and
                 // could follow, but each wants checking against real signals
                 // first.
