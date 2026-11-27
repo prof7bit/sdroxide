@@ -10,7 +10,7 @@
 > - **Transmit:** narrow TX filter (switchable), speech level meter, fix for cut-off ends of overs
 > - **Not compatible** with official remote clients and servers: use this build on both ends
 >
-> Download: [Releases](https://github.com/prof7bit/sdroxide/releases) (x86_64 Linux AppImage only, glibc 2.35 or newer)
+> Download: [Releases](https://github.com/prof7bit/sdroxide/releases) for Linux (x86_64 and ARM64, glibc 2.35 or newer), Windows and macOS. Only Linux x86_64 is tested; all other builds are **untested**.
 >
 > Many thanks to [dividebysandwich](https://github.com/dividebysandwich/sdroxide), the original author, for this great work; I will keep supporting and recommending the original project. **The Ko-fi button below is for the original author, not for me.**
 
