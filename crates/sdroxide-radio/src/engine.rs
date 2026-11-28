@@ -7992,7 +7992,13 @@ impl Engine {
             return;
         }
         let r = &self.state.rx[0];
-        self.source.set_control_filter(r.mode, r.filter_lo as f64, r.filter_hi as f64);
+        let mut passband = (r.filter_lo, r.filter_hi);
+        // The automatic RADE filter is for the demodulator here; a radio that
+        // filters is left as wide as before. A width set by hand still goes.
+        if r.mode.is_rade() && passband == self.rx_filter_at(r.mode, self.state.rx_freq_hz()) {
+            passband = self.state.filter_at(r.mode, self.state.rx_freq_hz());
+        }
+        self.source.set_control_filter(r.mode, passband.0 as f64, passband.1 as f64);
     }
 
     /// Hand the main receiver's AGC to a radio that filters for us, on the same
@@ -9235,6 +9241,7 @@ impl Engine {
                         .sat_lock
                         .as_ref()
                         .is_some_and(|l| l.cfg.uplink.is_some_and(|u| u.inverting));
+                    let (lo, hi) = self.tx_passband_of_rx();
                     let (lo, hi) = if inverting { (-hi, -lo) } else { (lo, hi) };
                     if let Some(m) = self.tx.as_mut().and_then(|tx| tx.modulator.as_mut()) {
                         m.set_filter(lo, hi);
@@ -10182,6 +10189,10 @@ impl Engine {
                 self.digi_config = c.clone();
                 if let Some(d) = self.digi.as_mut() {
                     d.set_config(c);
+                }
+                // The RADE receive filter goes with the selected version.
+                if self.state.rx[0].mode.is_rade() {
+                    self.follow_sideband();
                 }
                 // A radio that keys itself has its own speed control, and the
                 // panel's WPM chip is the operator setting it.
@@ -15558,7 +15569,11 @@ impl Engine {
         // `apply_control`, which applies the profile on the same terms.
         let profile =
             (self.state.rx[rx.index()].mode != mode).then(|| self.mode_profiles.effective(mode));
-        let (lo, hi) = self.state.filter_at(mode, dial);
+        // The narrow RADE filter is the main receiver's: only it has a decoder.
+        let (lo, hi) = match rx {
+            RxId::Main => self.rx_filter_at(mode, dial),
+            RxId::Sub => self.state.filter_at(mode, dial),
+        };
         let r = &mut self.state.rx[rx.index()];
         r.mode = mode;
         if let Some(profile) = profile {
@@ -18247,6 +18262,30 @@ impl Engine {
         self.emit_state();
     }
 
+    /// The receive passband `mode` gets on `dial_hz`:
+    /// [`RadioState::filter_at`], but on RADE only a little more than the
+    /// selected version's carriers, so that strong neighbours stay out of the
+    /// decoder.
+    fn rx_filter_at(&self, mode: Mode, dial_hz: f64) -> (f32, f32) {
+        if !mode.is_rade() {
+            return self.state.filter_at(mode, dial_hz);
+        }
+        let (lo, hi) = self.digi_config.rade_version.rx_filter_hz();
+        if self.state.is_lower_sideband(mode, dial_hz) { (-hi, -lo) } else { (lo, hi) }
+    }
+
+    /// The transmit passband that goes with the main receiver's filter. It is
+    /// that filter, except on RADE, whose narrow receive filter must not narrow
+    /// the transmission as well: how wide that is, the TX filter decides.
+    fn tx_passband_of_rx(&self) -> (f32, f32) {
+        let r = &self.state.rx[0];
+        if r.mode.is_rade() {
+            self.state.filter_at(r.mode, self.state.rx_freq_hz())
+        } else {
+            (r.filter_lo, r.filter_hi)
+        }
+    }
+
     /// Keep a band-dependent sideband following the dial.
     ///
     /// Analog SSTV and RADE have one — LSB on 160/80/40 m, USB above — so
@@ -18266,7 +18305,7 @@ impl Engine {
         if !mode.sideband_follows_band() {
             return;
         }
-        let want = self.state.filter_at(mode, self.state.rx_freq_hz());
+        let want = self.rx_filter_at(mode, self.state.rx_freq_hz());
         let r = &mut self.state.rx[0];
         if (r.filter_lo, r.filter_hi) == want {
             return;
@@ -19001,11 +19040,8 @@ impl Engine {
                         // A flipped sideband also mirrors the filter edges:
                         // USB's positive Hz-from-carrier range becomes LSB's
                         // negative one (and back), keeping the same width.
-                        let passband = if inverting {
-                            (-rx0.filter_hi, -rx0.filter_lo)
-                        } else {
-                            (rx0.filter_lo, rx0.filter_hi)
-                        };
+                        let (lo, hi) = self.tx_passband_of_rx();
+                        let passband = if inverting { (-hi, -lo) } else { (lo, hi) };
                         self.tx = Some(TxChain::new(mode, tx_rate, passband));
                     }
                     self.tx_center_hz = txf;

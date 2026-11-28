@@ -648,6 +648,17 @@ impl RadeVersion {
         }
     }
 
+    /// The receive passband for this waveform, in Hz of audio from the dial,
+    /// upper-sideband sense. The receive filter's skirts are soft, so these sit
+    /// well outside [`Self::carrier_edges_hz`]: the outer carriers lose about
+    /// 0.2 dB.
+    pub fn rx_filter_hz(self) -> (f32, f32) {
+        match self {
+            RadeVersion::V1 => (450.0, 2500.0),
+            RadeVersion::V2 => (850.0, 2100.0),
+        }
+    }
+
     /// What FreeDV Reporter calls this waveform.
     pub fn reporter_mode(self) -> &'static str {
         match self {
