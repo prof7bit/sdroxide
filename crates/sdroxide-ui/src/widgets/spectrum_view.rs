@@ -911,6 +911,10 @@ const NET_BOTTOM_MARGIN: f32 = 4.0;
 const NET_H_GAP: f32 = 6.0;
 const NET_LEADER: f32 = 14.0;
 const NET_MAX_LANES: usize = 5;
+/// Boxes side by side in one lane for stations on the same spot of the
+/// waterfall, used once the lanes are full. Few, so that no box ends up so far
+/// from its signal that it reads as another frequency's.
+const NET_MAX_COLUMNS: usize = 3;
 /// Fraction of the waterfall height everything at the oldest edge may take
 /// together — band-plan strip, memory lanes and these lanes — before further
 /// lanes are dropped. The rest is the signal, and the skimmer's boxes at the
@@ -922,6 +926,9 @@ struct NetBox {
     rect: Rect,
     sig_x: f32,
     idx: usize,
+    /// 0 for the box that has the leader to its signal; higher for one placed
+    /// beside it.
+    column: usize,
 }
 
 /// The badge behind a network spot's call, and whether it is filled. A FreeDV
@@ -1127,6 +1134,81 @@ fn net_spot_color(spot: &Spot, hovered: bool) -> Color32 {
     if hovered { Color32::from_rgb(r, g, b) } else { Color32::from_rgba_unmultiplied(r, g, b, 225) }
 }
 
+/// Where one network label goes: its lane, its column in that lane and its
+/// left edge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct NetPlace {
+    lane: usize,
+    column: usize,
+    left: f32,
+}
+
+/// Places labels given as `(signal x, box width)`, sorted by x; `None` for one
+/// there is no room for.
+///
+/// First each takes a lane of its own beside its signal, as far as the lanes go.
+/// Only then are the ones left over lined up to the right of a box on the same
+/// signal, so that they take no room from any label of the first round.
+fn place_net_labels(items: &[(f32, f32)], max_lanes: usize) -> Vec<Option<NetPlace>> {
+    let mut out: Vec<Option<NetPlace>> = vec![None; items.len()];
+    let mut lane_right: Vec<f32> = Vec::new();
+    for (i, &(xc, w)) in items.iter().enumerate() {
+        let left = xc + NET_LEADER;
+        let lane = lane_right.iter().position(|&r| xc >= r).unwrap_or(lane_right.len());
+        if lane >= max_lanes {
+            continue;
+        }
+        if lane == lane_right.len() {
+            lane_right.push(0.0);
+        }
+        lane_right[lane] = left + w + NET_H_GAP;
+        out[i] = Some(NetPlace { lane, column: 0, left });
+    }
+
+    for i in 0..items.len() {
+        if out[i].is_some() {
+            continue;
+        }
+        let (xc, w) = items[i];
+        // (column, lane, left): the fewest columns first, then the lowest lane,
+        // which fills the rows evenly.
+        let mut best: Option<(usize, usize, f32)> = None;
+        for head in 0..items.len() {
+            let Some(h) = out[head].filter(|h| h.column == 0) else { continue };
+            // Only beside a box on (as good as) the same signal: a box without
+            // a leader of its own is read as belonging to its neighbour.
+            if (items[head].0 - xc).abs() > NET_LEADER {
+                continue;
+            }
+            // The row so far: the head and what already continues it.
+            let (mut column, mut right) = (0, h.left + items[head].1);
+            while let Some((c, r)) = out.iter().zip(items).find_map(|(p, it)| {
+                let p = (*p)?;
+                (p.lane == h.lane && p.column == column + 1 && p.left == right + NET_H_GAP)
+                    .then_some((p.column, p.left + it.1))
+            }) {
+                (column, right) = (c, r);
+            }
+            let (column, left) = (column + 1, right + NET_H_GAP);
+            if column >= NET_MAX_COLUMNS {
+                continue;
+            }
+            let collides = out.iter().zip(items).any(|(p, it)| {
+                p.is_some_and(|p| {
+                    p.lane == h.lane
+                        && left < p.left + it.1 + NET_H_GAP
+                        && p.left < left + w + NET_H_GAP
+                })
+            });
+            if !collides && best.is_none_or(|(c, l, _)| (column, h.lane) < (c, l)) {
+                best = Some((column, h.lane, left));
+            }
+        }
+        out[i] = best.map(|(column, lane, left)| NetPlace { lane, column, left });
+    }
+    out
+}
+
 /// Lay visible network spots into bottom-anchored staggered lanes.
 fn layout_net_spots(
     p: &egui::Painter,
@@ -1152,26 +1234,12 @@ fn layout_net_spots(
         .floor()
         .max(0.0) as usize;
     let max_lanes = fit.min(NET_MAX_LANES);
-    let mut lane_right: Vec<f32> = Vec::new();
+    let items: Vec<(f32, f32)> =
+        vis.iter().map(|&(xc, idx)| (xc, net_spot_width(p, &spots[idx]))).collect();
+    let places = place_net_labels(&items, max_lanes);
     let mut out = Vec::with_capacity(vis.len());
-    for (xc, idx) in vis {
-        let box_w = net_spot_width(p, &spots[idx]);
-        let box_left = xc + NET_LEADER;
-        let foot_right = box_left + box_w + NET_H_GAP;
-        let mut lane = lane_right.len();
-        for (k, &r) in lane_right.iter().enumerate() {
-            if xc >= r {
-                lane = k;
-                break;
-            }
-        }
-        if lane >= max_lanes {
-            continue;
-        }
-        if lane == lane_right.len() {
-            lane_right.push(0.0);
-        }
-        lane_right[lane] = foot_right;
+    for (((xc, idx), (_, box_w)), place) in vis.into_iter().zip(items).zip(places) {
+        let Some(NetPlace { lane, column, left }) = place else { continue };
         // Anchored at the *oldest* edge, opposite the skimmer boxes, so the two
         // sets never collide — which end that is depends on the flip. Stacked
         // from `base`, the depth the band-plan strip and the memory marks
@@ -1183,9 +1251,10 @@ fn layout_net_spots(
             wf_rect.bottom() - lane_off - box_h
         };
         out.push(NetBox {
-            rect: Rect::from_min_size(pos2(box_left, top), vec2(box_w, box_h)),
+            rect: Rect::from_min_size(pos2(left, top), vec2(box_w, box_h)),
             sig_x: xc,
             idx,
+            column,
         });
     }
     out
@@ -3110,11 +3179,15 @@ pub fn show_ext(
             a,
         );
         painter.vline(b.sig_x, lanes_rect.y_range(), Stroke::new(1.0, vcol));
-        painter.line_segment(
-            [pos2(b.sig_x, cy), pos2(b.rect.left(), cy)],
-            Stroke::new(1.0, fade(border, a)),
-        );
-        painter.circle_filled(pos2(b.sig_x, cy), 1.8, fade(border, a));
+        // A box beside another has no leader: it would run across its
+        // neighbour.
+        if b.column == 0 {
+            painter.line_segment(
+                [pos2(b.sig_x, cy), pos2(b.rect.left(), cy)],
+                Stroke::new(1.0, fade(border, a)),
+            );
+            painter.circle_filled(pos2(b.sig_x, cy), 1.8, fade(border, a));
+        }
         draw_net_box(&painter, b, spot, hovered, a);
         // A TCI spot's text — a logger's "new DXCC", a bridge's cluster
         // comment — has no room in the box, and the box is all a TCI spot has
@@ -4877,5 +4950,59 @@ mod tests {
             label_box(&p, pos2(50.0, 120.0), "S/N 4.2 dB", Color32::WHITE, bounds);
         }
         ctx.end_pass().drop_without_applying_deltas();
+    }
+}
+
+#[cfg(test)]
+mod net_label_tests {
+    use super::*;
+
+    const W: f32 = 60.0;
+
+    /// Lanes and columns of what was placed, in input order.
+    fn spots(places: &[Option<NetPlace>]) -> Vec<Option<(usize, usize)>> {
+        places.iter().map(|p| p.map(|p| (p.lane, p.column))).collect()
+    }
+
+    #[test]
+    fn stations_on_one_frequency_fill_the_lanes_and_then_go_side_by_side() {
+        let places = place_net_labels(&[(100.0, W); 8], 5);
+        assert_eq!(
+            spots(&places),
+            [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (0, 1), (1, 1), (2, 1)].map(Some)
+        );
+        let (first, beside) = (places[0].unwrap(), places[5].unwrap());
+        assert_eq!(beside.left, first.left + W + NET_H_GAP);
+    }
+
+    #[test]
+    fn there_are_no_more_than_the_allowed_columns() {
+        let places = place_net_labels(&[(100.0, W); 20], 5);
+        assert_eq!(places.iter().flatten().count(), 5 * NET_MAX_COLUMNS);
+        assert!(places.iter().flatten().all(|p| p.column < NET_MAX_COLUMNS));
+    }
+
+    #[test]
+    fn a_box_beside_another_takes_no_room_from_a_neighbouring_frequency() {
+        // The neighbour's signal is just clear of the first column.
+        let neighbour = 100.0 + NET_LEADER + W + NET_H_GAP;
+        let mut items = vec![(100.0, W); 6];
+        items.push((neighbour, W));
+        let places = place_net_labels(&items, 5);
+        assert_eq!(spots(&places)[6], Some((0, 0)));
+        // So the one left over goes beside the next lane instead.
+        assert_eq!(spots(&places)[5], Some((1, 1)));
+    }
+
+    #[test]
+    fn a_station_on_another_signal_is_not_lined_up_beside_a_stranger() {
+        let mut items = vec![(100.0, W); 5];
+        items.push((100.0 + NET_LEADER + 1.0, W));
+        assert_eq!(place_net_labels(&items, 5)[5], None);
+    }
+
+    #[test]
+    fn nothing_is_placed_without_a_lane() {
+        assert!(place_net_labels(&[(100.0, W); 3], 0).iter().all(Option::is_none));
     }
 }
